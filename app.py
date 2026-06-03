@@ -24,7 +24,12 @@ except Exception:
 
 
 APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
-USER_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else APP_DIR
+USER_DIR = Path(
+    os.environ.get(
+        "NAI_ARTIST_LAB_USER_DIR",
+        str(Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else APP_DIR),
+    )
+)
 DATA_DIR = USER_DIR / "data"
 OUTPUT_DIR = USER_DIR / "outputs"
 STATE_PATH = DATA_DIR / "app_state.json"
