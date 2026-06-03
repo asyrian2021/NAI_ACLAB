@@ -1,6 +1,5 @@
 __pycache__/
 *.pyc
-node_modules/
 data/
 outputs/
 build/
@@ -10,9 +9,9 @@ release/
 *.log
 *.zip
 *.7z
-*.tgz
 *.dmg
 *.exe
 *.msi
 *.pkg
 .env
+.git/

@@ -5,18 +5,41 @@ NovelAI 이미지 생성에서 작가 태그 조합과 가중치를 실험하기
 
 ## 설치와 실행
 
+### npm으로 실행 (권장)
+
+Windows 실행 파일의 SmartScreen/보안 경고가 부담스럽다면 npm 방식으로 실행하는 것을 권장합니다.
+
+필요한 것:
+
+- Node.js 18 이상
+- Python 3.10 이상
+
+실행 방법:
+
+```powershell
+npm start
+```
+
+GitHub에서 처음 받은 뒤에는 프로젝트 폴더에서 위 명령을 실행하면 됩니다. 브라우저가 자동으로 열리고, 앱 사용을 마친 뒤 안내 창을 닫으면 서버가 종료됩니다.
+
+npm 패키지로 공개한 뒤에는 아래처럼 바로 실행할 수 있습니다.
+
+```powershell
+npx nai-artist-combination-lab
+```
+
 ### Windows 배포판
+
+Releases의 `NAI-Artist-Lab-windows.zip`을 사용할 수도 있습니다. 다만 서명되지 않은 실행 파일이기 때문에 Windows 보안 경고가 표시될 수 있습니다.
 
 1. Releases에서 `NAI-Artist-Lab-windows.zip`을 다운로드합니다.
 2. 원하는 폴더에 압축을 풉니다.
 3. `NAI Artist Lab.exe`를 실행합니다.
 4. 브라우저가 자동으로 열리면 앱을 사용합니다.
 
-앱을 종료하려면 실행 중인 작은 안내 창에서 확인을 누르면 됩니다.
+### Python으로 직접 실행
 
-### Python으로 실행
-
-Python 3.10 이상이 설치되어 있다면 소스 코드로도 실행할 수 있습니다.
+Python 3.10 이상이 설치되어 있다면 npm 없이도 소스 코드로 실행할 수 있습니다.
 
 ```powershell
 python launcher.py
@@ -128,14 +151,22 @@ override가 입력되어 있으면 모든 프리셋 조합에서 override 값을
 
 ## 저장 위치
 
-소스 실행 시:
+소스/Python 실행 시:
 
 - 앱 상태: `data/app_state.json`
 - 생성 이미지와 요청 JSON: `outputs/`
 
+`npm start` 실행 시:
+
+- Windows: `%APPDATA%\NAI Artist Combination Lab`
+- macOS: `~/Library/Application Support/NAI Artist Combination Lab`
+- Linux: `~/.local/share/nai-artist-combination-lab`
+
 Windows 배포판 실행 시:
 
 - 실행 파일 옆에 `data/`와 `outputs/` 폴더가 생성됩니다.
+
+저장 위치를 직접 지정하려면 `NAI_ARTIST_LAB_USER_DIR` 환경 변수를 설정하면 됩니다.
 
 ## 참고
 

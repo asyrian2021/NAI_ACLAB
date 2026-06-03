@@ -1,0 +1,24 @@
+{
+  "name": "nai-artist-combination-lab",
+  "version": "0.1.0",
+  "description": "Local web UI for experimenting with NovelAI artist tag weight combinations.",
+  "license": "MIT",
+  "type": "commonjs",
+  "bin": {
+    "nai-artist-lab": "bin/nai-artist-lab.js"
+  },
+  "scripts": {
+    "start": "node bin/nai-artist-lab.js"
+  },
+  "files": [
+    "app.py",
+    "web_app.py",
+    "launcher.py",
+    "web/",
+    "bin/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
