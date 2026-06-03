@@ -3,24 +3,6 @@
 NovelAI 이미지 생성에서 작가 태그 조합과 가중치를 실험하기 위한 로컬 웹앱입니다.  
 작가 태그의 가중치를 랜덤하게 바꿔 여러 이미지를 만들고, 마음에 드는 결과에서 작가 가중치를 다시 불러와 고정한 뒤 여러 프리셋 조합을 테스트할 수 있습니다.
 
-## 화면 미리보기
-
-### 생성
-
-![생성 화면](docs/screenshots/generate.png)
-
-### 작가 태그
-
-![작가 태그 화면](docs/screenshots/artist-tags.png)
-
-### 프리셋
-
-![프리셋 화면](docs/screenshots/presets.png)
-
-### 타율 테스트
-
-![타율 테스트 화면](docs/screenshots/batting-test.png)
-
 ## 설치와 실행
 
 ### Windows 배포판
