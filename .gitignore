@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+data/
+outputs/
+build/
+dist/
+release/
+*.spec
+*.log
+*.zip
+*.7z
+*.dmg
+*.exe
+*.msi
+*.pkg
+.env
