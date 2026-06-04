@@ -56,6 +56,7 @@ const imageSizeOptions = {
   landscape: { label: "Landscape", width: 1216, height: 832 },
   square: { label: "Square", width: 1024, height: 1024 },
 };
+const defaultNovelAiEndpoint = "https://image.novelai.net/ai/generate-image";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -109,9 +110,14 @@ function setSaveState(text) {
 }
 
 async function request(path, options = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    "X-NAI-ACLAB-Token": window.__NAI_ACLAB_TOKEN__ || "",
+    ...(options.headers || {}),
+  };
   const response = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers,
   });
   if (!response.ok) throw new Error(await response.text());
   return response.json();
@@ -571,32 +577,30 @@ function renderImageCard(item, context = {}) {
   card.className = `image-card ${item.error ? "error" : ""}`;
   const enriched = enrichedImageItem(item, context);
   const modalList = context.modalItems || [enriched];
-  card.innerHTML = `
-    ${item.image_url ? `<img src="${item.image_url}" alt="generated image" />` : ""}
-    <div>${item.error ? item.error : item.created_at || "생성 완료"}</div>
-  `;
-  const img = card.querySelector("img");
-  if (img) img.onclick = () => openImageModal(enriched, modalList);
-  const meta = card.querySelector("div");
-  if (meta) {
-    const label = meta.textContent;
-    meta.className = "image-card-meta";
-    meta.textContent = "";
-    const labelNode = document.createElement("span");
-    labelNode.textContent = label;
-    meta.appendChild(labelNode);
-    if (canReuseArtists(item)) {
-      const button = document.createElement("button");
-      button.className = "mini-button artist-reuse-button";
-      button.type = "button";
-      button.textContent = "가중치 불러오기";
-      button.onclick = (event) => {
-        event.stopPropagation();
-        generateFromImage(enriched);
-      };
-      meta.appendChild(button);
-    }
+  if (item.image_url) {
+    const img = document.createElement("img");
+    img.src = item.image_url;
+    img.alt = "generated image";
+    img.onclick = () => openImageModal(enriched, modalList);
+    card.appendChild(img);
   }
+  const meta = document.createElement("div");
+  meta.className = "image-card-meta";
+  const labelNode = document.createElement("span");
+  labelNode.textContent = item.error ? item.error : item.created_at || "생성 완료";
+  meta.appendChild(labelNode);
+  if (canReuseArtists(item)) {
+    const button = document.createElement("button");
+    button.className = "mini-button artist-reuse-button";
+    button.type = "button";
+    button.textContent = "가중치 불러오기";
+    button.onclick = (event) => {
+      event.stopPropagation();
+      generateFromImage(enriched);
+    };
+    meta.appendChild(button);
+  }
+  card.appendChild(meta);
   return card;
 }
 
@@ -631,7 +635,12 @@ function renderHistory() {
     };
     const button = document.createElement("button");
     button.className = `list-item ${index === historyIndex ? "active" : ""}`;
-    button.innerHTML = `<strong>${history.base_preset} + ${history.character_preset}</strong><br><span>${history.created_at} · ${(history.items || []).length}장</span>`;
+    const title = document.createElement("strong");
+    title.textContent = `${history.base_preset || ""} + ${history.character_preset || ""}`;
+    const br = document.createElement("br");
+    const meta = document.createElement("span");
+    meta.textContent = `${history.created_at || ""} · ${(history.items || []).length}장`;
+    button.append(title, br, meta);
     button.onclick = () => {
       historyIndex = index;
       renderHistory();
@@ -1045,6 +1054,7 @@ function setBattingRunning(running, cancelling = false) {
 
 async function startBattingTest() {
   syncEditorsToState();
+  if (!confirmCustomEndpointTokenUse()) return;
   if (!currentFixedArtists().length) {
     window.alert("타율 테스트는 작가태그 가중치를 고정한 상태에서 실행하는 기능입니다. 먼저 히스토리나 가중치 비교에서 가중치를 불러와 주세요.");
     return;
@@ -1153,8 +1163,23 @@ function generationStateForRequest() {
   return requestState;
 }
 
+function shouldConfirmCustomEndpoint() {
+  const endpoint = String(state?.api?.endpoint || "").trim();
+  if (!endpoint || endpoint === defaultNovelAiEndpoint) return false;
+  return Boolean(state?.api?.token_saved || String($("#api_token")?.value || "").trim());
+}
+
+function confirmCustomEndpointTokenUse() {
+  if (!shouldConfirmCustomEndpoint()) return true;
+  return window.confirm(
+    "기본 NovelAI endpoint가 아닌 주소가 설정되어 있습니다.\n\n" +
+    "이미지 생성 시 API 토큰이 이 endpoint로 전송됩니다. 계속할까요?"
+  );
+}
+
 async function startGeneration() {
   syncEditorsToState();
+  if (!confirmCustomEndpointTokenUse()) return;
   setProgressActive(true);
   $("#jobLog").textContent = "생성 작업을 시작합니다...\n";
   if (currentFixedArtists().length) $("#jobLog").textContent = "고정 작가가중치로 생성 작업을 시작합니다...\n";

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import random
+import secrets
 import shutil
 import sys
 import threading
@@ -43,6 +44,7 @@ from app import (
 WEB_DIR = APP_DIR / "web"
 JOBS: dict[str, dict] = {}
 STATE_LOCK = threading.Lock()
+LOCAL_API_TOKEN = secrets.token_urlsafe(32)
 
 
 def dataclass_from_dict(cls, data: dict):
@@ -80,10 +82,22 @@ def media_url(path: str) -> str:
     try:
         raw = str(path or "")
         candidate = Path(raw)
-        rel = candidate.resolve().relative_to(OUTPUT_DIR.resolve()) if candidate.is_absolute() else Path(raw)
+        root = OUTPUT_DIR.resolve()
+        resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
+        rel = resolved.relative_to(root)
     except (ValueError, OSError):
         return ""
     return "/media/" + urllib.parse.quote(str(rel).replace("\\", "/"))
+
+
+def safe_child_path(root: Path, rel: str) -> Path | None:
+    try:
+        root_resolved = root.resolve()
+        child = (root_resolved / urllib.parse.unquote(rel)).resolve()
+        child.relative_to(root_resolved)
+        return child
+    except (ValueError, OSError):
+        return None
 
 
 def state_payload(state: AppState) -> dict:
@@ -432,27 +446,57 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_index(self) -> None:
+        path = WEB_DIR / "index.html"
+        if not path.exists() or not path.is_file():
+            self.send_error(404)
+            return
+        token_script = f"<script>window.__NAI_ACLAB_TOKEN__ = {json.dumps(LOCAL_API_TOKEN)};</script>"
+        html = path.read_text(encoding="utf-8").replace("</head>", f"    {token_script}\n  </head>")
+        body = html.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def authorized_api_request(self) -> bool:
+        return self.headers.get("X-NAI-ACLAB-Token", "") == LOCAL_API_TOKEN
+
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
         route = parsed.path
         if route == "/":
-            self.send_file(WEB_DIR / "index.html")
+            self.send_index()
         elif route.startswith("/web/"):
-            self.send_file((WEB_DIR / route.removeprefix("/web/")).resolve())
+            path = safe_child_path(WEB_DIR, route.removeprefix("/web/"))
+            if not path:
+                self.send_error(403)
+                return
+            self.send_file(path)
         elif route == "/api/state":
+            if not self.authorized_api_request():
+                self.send_error(403)
+                return
             self.send_json({"state": state_payload(load_state())})
         elif route == "/api/preview":
+            if not self.authorized_api_request():
+                self.send_error(403)
+                return
             state = load_state()
             prompt, negative, uc_prompt, artists = build_prompt(state)
             self.send_json({"prompt": prompt, "negative": negative, "uc": uc_prompt, "artists": artists})
         elif route == "/api/job":
+            if not self.authorized_api_request():
+                self.send_error(403)
+                return
             query = urllib.parse.parse_qs(parsed.query)
             job_id = query.get("id", [""])[0]
             self.send_json({"job": JOBS.get(job_id, {"status": "missing"})})
         elif route.startswith("/media/"):
-            rel = urllib.parse.unquote(route.removeprefix("/media/"))
-            path = (OUTPUT_DIR / rel).resolve()
-            if not str(path).startswith(str(OUTPUT_DIR.resolve())):
+            path = safe_child_path(OUTPUT_DIR, route.removeprefix("/media/"))
+            if not path:
                 self.send_error(403)
                 return
             self.send_file(path)
@@ -462,6 +506,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
         route = parsed.path
+        if route.startswith("/api/") and not self.authorized_api_request():
+            self.send_error(403)
+            return
         data = self.read_json()
         if route == "/api/state":
             state = save_incoming_state(data.get("state", data))
