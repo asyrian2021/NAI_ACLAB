@@ -6,7 +6,6 @@ import json
 import os
 import random
 import re
-import sys
 import threading
 import time
 import urllib.error
@@ -23,11 +22,11 @@ except Exception:
     filedialog = messagebox = ttk = tk = None
 
 
-APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+APP_DIR = Path(__file__).resolve().parent
 USER_DIR = Path(
     os.environ.get(
         "NAI_ARTIST_LAB_USER_DIR",
-        str(Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else APP_DIR),
+        str(APP_DIR),
     )
 )
 DATA_DIR = USER_DIR / "data"

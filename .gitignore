@@ -3,16 +3,7 @@ __pycache__/
 node_modules/
 data/
 outputs/
-build/
-dist/
-release/
 *.spec
 *.log
-*.zip
-*.7z
 *.tgz
-*.dmg
-*.exe
-*.msi
-*.pkg
 .env
