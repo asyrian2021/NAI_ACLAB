@@ -41,8 +41,8 @@ DEFAULT_USER_AGENT = (
 
 
 def ensure_dirs() -> None:
-    DATA_DIR.mkdir(exist_ok=True)
-    OUTPUT_DIR.mkdir(exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def now_id() -> str:
@@ -190,7 +190,7 @@ class BattingScene:
     name: str = ""
     base_preset: str = ""
     character_preset: str = ""
-    count: int = 1
+    count: int = 2
 
 
 @dataclass

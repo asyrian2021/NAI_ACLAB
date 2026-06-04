@@ -235,7 +235,12 @@ def run_generation(job_id: str, state: AppState) -> None:
     items = []
 
     JOBS[job_id].update({"status": "running", "progress": 0, "total": count, "output_dir": str(out_dir), "items": []})
+    cancelled = False
     for idx in range(count):
+        if JOBS.get(job_id, {}).get("cancel_requested"):
+            cancelled = True
+            JOBS[job_id]["log"].append("중지 요청으로 남은 생성을 건너뜁니다.")
+            break
         prompt, negative, uc_prompt, artists = build_prompt(state)
         path = out_dir / f"image_{idx + 1:03}.png"
         metadata = {
@@ -264,11 +269,17 @@ def run_generation(job_id: str, state: AppState) -> None:
         "output_dir": str(out_dir),
         "items": items,
     }
-    with STATE_LOCK:
-        latest = load_state()
-        latest.history.insert(0, history)
-        save_state(latest)
-    JOBS[job_id].update({"status": "done", "history": history, "log": JOBS[job_id]["log"] + ["생성 작업이 끝났습니다."]})
+    update = {
+        "status": "cancelled" if cancelled or JOBS.get(job_id, {}).get("cancel_requested") else "done",
+        "log": JOBS[job_id]["log"] + ["생성 작업이 중지되었습니다." if cancelled else "생성 작업이 끝났습니다."],
+    }
+    if items:
+        with STATE_LOCK:
+            latest = load_state()
+            latest.history.insert(0, history)
+            save_state(latest)
+        update["history"] = history
+    JOBS[job_id].update(update)
 
 
 def scene_state(state: AppState, scene: BattingScene) -> AppState:
@@ -281,9 +292,9 @@ def scene_state(state: AppState, scene: BattingScene) -> AppState:
 
 def scene_count(scene: BattingScene) -> int:
     try:
-        return max(1, int(scene.count or 1))
+        return max(1, int(scene.count or 2))
     except (TypeError, ValueError):
-        return 1
+        return 2
 
 
 def run_batting_test(job_id: str, state: AppState) -> None:
@@ -310,7 +321,12 @@ def run_batting_test(job_id: str, state: AppState) -> None:
         }
     )
 
+    cancelled = False
     for scene_index, scene in enumerate(scenes, start=1):
+        if JOBS.get(job_id, {}).get("cancel_requested"):
+            cancelled = True
+            JOBS[job_id]["log"].append("중지 요청으로 남은 씬을 건너뜁니다.")
+            break
         current = scene_state(state, scene)
         base = selected_base(current)
         character = selected_character(current)
@@ -323,6 +339,10 @@ def run_batting_test(job_id: str, state: AppState) -> None:
         )
 
         for image_index in range(count):
+            if JOBS.get(job_id, {}).get("cancel_requested"):
+                cancelled = True
+                JOBS[job_id]["log"].append(f"{scene_name}: 중지 요청으로 남은 이미지를 건너뜁니다.")
+                break
             prompt, negative, uc_prompt, artists = build_prompt(current)
             path = scene_dir / f"image_{image_index + 1:03}.png"
             metadata = {
@@ -347,6 +367,8 @@ def run_batting_test(job_id: str, state: AppState) -> None:
             items.append(metadata)
             progress += 1
             JOBS[job_id].update({"progress": progress, "items": [item_payload(item) for item in items]})
+        if cancelled:
+            break
 
     history = {
         "id": out_dir.name,
@@ -358,11 +380,17 @@ def run_batting_test(job_id: str, state: AppState) -> None:
         "scenes": [asdict(scene) for scene in scenes],
         "items": items,
     }
-    with STATE_LOCK:
-        latest = load_state()
-        latest.history.insert(0, history)
-        save_state(latest)
-    JOBS[job_id].update({"status": "done", "history": history, "log": JOBS[job_id]["log"] + ["타율 테스트가 끝났습니다."]})
+    update = {
+        "status": "cancelled" if cancelled or JOBS.get(job_id, {}).get("cancel_requested") else "done",
+        "log": JOBS[job_id]["log"] + ["타율 테스트가 중지되었습니다." if cancelled else "타율 테스트가 끝났습니다."],
+    }
+    if items:
+        with STATE_LOCK:
+            latest = load_state()
+            latest.history.insert(0, history)
+            save_state(latest)
+        update["history"] = history
+    JOBS[job_id].update(update)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -449,6 +477,18 @@ class Handler(BaseHTTPRequestHandler):
             thread = threading.Thread(target=run_batting_test, args=(job_id, state), daemon=True)
             thread.start()
             self.send_json({"job_id": job_id})
+        elif route == "/api/job/cancel":
+            job_id = str(data.get("job_id", ""))
+            job = JOBS.get(job_id)
+            if not job:
+                self.send_json({"job": {"status": "missing"}}, status=404)
+                return
+            if job.get("status") not in ("done", "cancelled", "missing"):
+                job["cancel_requested"] = True
+                job["status"] = "cancelling"
+                if "중지 요청을 받았습니다. 현재 처리 중인 이미지가 끝나면 멈춥니다." not in job.setdefault("log", []):
+                    job["log"].append("중지 요청을 받았습니다. 현재 처리 중인 이미지가 끝나면 멈춥니다.")
+            self.send_json({"job": job})
         elif route == "/api/history/delete":
             state = delete_history_entries(data.get("ids", []), bool(data.get("delete_files", False)))
             self.send_json({"state": state_payload(state)})

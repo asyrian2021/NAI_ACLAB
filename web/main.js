@@ -27,6 +27,7 @@ let modalPanY = 0;
 let modalDragging = false;
 let modalDragStart = { x: 0, y: 0, panX: 0, panY: 0 };
 let presetPickerKind = null;
+let activeJobs = { generate: null, batting: null };
 
 const pageCopy = {
   generate: ["생성", "프리셋, 작가 조합, 생성 상태를 한 화면에서 조정합니다."],
@@ -203,7 +204,7 @@ function syncBattingScenesToState() {
     name: row.querySelector(".batting-scene-name")?.value.trim() || `Scene ${index + 1}`,
     base_preset: row.querySelector(".batting-scene-base")?.value || "",
     character_preset: row.querySelector(".batting-scene-character")?.value || "",
-    count: Math.max(1, Number(row.querySelector(".batting-scene-count")?.value || 1)),
+    count: Math.max(1, Number(row.querySelector(".batting-scene-count")?.value || 2)),
   }));
 }
 
@@ -406,7 +407,7 @@ function renderBatting() {
   root.dataset.rendered = "true";
   root.innerHTML = "";
   if (!state.batting_scenes.length) {
-    root.innerHTML = `<div class="empty-box">아직 등록된 씬이 없습니다. 현재 생성 메뉴의 프리셋 조합으로 씬을 추가해보세요.</div>`;
+    root.innerHTML = `<div class="empty-box">아직 등록된 씬이 없습니다. 씬을 추가해보세요.</div>`;
     return;
   }
   state.batting_scenes.forEach((scene, index) => {
@@ -417,7 +418,7 @@ function renderBatting() {
       <label><span>씬 이름</span><input class="batting-scene-name" value="${escapeHtml(scene.name || `Scene ${index + 1}`)}" /></label>
       <label><span>베이스 + 퀄리티</span><select class="batting-scene-base">${selectOptionsHtml(state.base_presets, scene.base_preset)}</select></label>
       <label><span>캐릭터</span><select class="batting-scene-character">${selectOptionsHtml(state.character_presets, scene.character_preset)}</select></label>
-      <label><span>생성 개수</span><input class="batting-scene-count" type="number" min="1" max="200" value="${Math.max(1, Number(scene.count || 1))}" /></label>
+      <label><span>생성 개수</span><input class="batting-scene-count" type="number" min="1" max="200" value="${Math.max(1, Number(scene.count || 2))}" /></label>
       <button class="icon-button batting-scene-delete" type="button" title="씬 삭제">×</button>
     `;
     row.querySelector(".batting-scene-delete").onclick = () => deleteBattingScene(index);
@@ -1006,7 +1007,7 @@ function addBattingScene() {
     name: uniqueName(state.batting_scenes, `Scene ${nextIndex}`),
     base_preset: state.generation.base_preset || state.base_presets[0]?.name || "",
     character_preset: state.generation.character_preset || state.character_presets[0]?.name || "",
-    count: Math.max(1, Number(state.generation.count || 1)),
+    count: 2,
   });
   renderBatting();
   scheduleSave();
@@ -1026,6 +1027,18 @@ function battingStateForRequest() {
   return requestState;
 }
 
+function setBattingRunning(running, cancelling = false) {
+  const startButton = $("#startBattingButton");
+  const addButton = $("#addBattingSceneButton");
+  const stopButton = $("#stopBattingButton");
+  if (startButton) startButton.disabled = running;
+  if (addButton) addButton.disabled = running;
+  if (stopButton) {
+    stopButton.disabled = !running || cancelling;
+    stopButton.textContent = cancelling ? "중지 중" : "생성 중지";
+  }
+}
+
 async function startBattingTest() {
   syncEditorsToState();
   if (!currentFixedArtists().length) {
@@ -1043,11 +1056,29 @@ async function startBattingTest() {
   $("#battingProgressBar").style.width = "0%";
   setProgressActive(true, "#battingProgress");
   renderLiveGallery([], "#battingLiveGallery");
-  const data = await request("/api/batting/generate", {
+  setBattingRunning(true);
+  try {
+    const data = await request("/api/batting/generate", {
+      method: "POST",
+      body: JSON.stringify({ state: battingStateForRequest() }),
+    });
+    activeJobs.batting = data.job_id;
+    pollJob(data.job_id, jobTargets("batting"));
+  } catch (error) {
+    setBattingRunning(false);
+    $("#battingProgressText").textContent = "실패";
+    $("#battingJobLog").textContent += `시작 실패: ${error.message}\n`;
+  }
+}
+
+async function stopBattingTest() {
+  if (!activeJobs.batting) return;
+  $("#stopBattingButton").disabled = true;
+  $("#battingProgressText").textContent = "중지 요청";
+  await request("/api/job/cancel", {
     method: "POST",
-    body: JSON.stringify({ state: battingStateForRequest() }),
+    body: JSON.stringify({ job_id: activeJobs.batting }),
   });
-  pollJob(data.job_id, jobTargets("batting"));
 }
 
 async function deleteSelectedHistory() {
@@ -1135,6 +1166,7 @@ async function startGeneration() {
 function jobTargets(kind) {
   if (kind === "batting") {
     return {
+      kind,
       finalTab: "batting",
       gallery: "#battingLiveGallery",
       log: "#battingJobLog",
@@ -1142,9 +1174,11 @@ function jobTargets(kind) {
       progressText: "#battingProgressText",
       progressCount: "#battingProgressCount",
       progressBar: "#battingProgressBar",
+      stopButton: "#stopBattingButton",
     };
   }
   return {
+    kind,
     finalTab: "generate",
     gallery: "#liveGallery",
     log: "#jobLog",
@@ -1160,16 +1194,33 @@ async function pollJob(jobId, targets = jobTargets("generate")) {
   const job = data.job;
   const total = job.total || 0;
   const progress = job.progress || 0;
-  $(targets.progressText).textContent = job.status === "done" ? "완료" : "생성 중";
-  setProgressActive(job.status !== "done" && job.status !== "missing", targets.progress);
+  const terminal = ["done", "missing", "cancelled"].includes(job.status);
+  const statusText = {
+    done: "완료",
+    missing: "작업 없음",
+    cancelled: "중지됨",
+    cancelling: "중지 중",
+    queued: "대기 중",
+    running: "생성 중",
+  }[job.status] || "생성 중";
+  $(targets.progressText).textContent = statusText;
+  setProgressActive(!terminal && job.status !== "queued", targets.progress);
   $(targets.progressCount).textContent = `${progress} / ${total}`;
   $(targets.progressBar).style.width = total ? `${(progress / total) * 100}%` : "0%";
   $(targets.log).textContent = (job.log || []).join("\n");
   renderLiveGallery(job.items || [], targets.gallery);
-  if (job.status !== "done" && job.status !== "missing") {
+  if (targets.kind === "batting") {
+    activeJobs.batting = terminal ? null : jobId;
+    setBattingRunning(!terminal, job.status === "cancelling");
+  }
+  if (!terminal) {
     setTimeout(() => pollJob(jobId, targets), 900);
   } else {
     setProgressActive(false, targets.progress);
+    if (targets.kind === "batting") {
+      activeJobs.batting = null;
+      setBattingRunning(false);
+    }
     await loadState();
     switchTab(targets.finalTab);
   }
@@ -1434,6 +1485,7 @@ function bindEvents() {
   $("#clearFixedArtistsButton").onclick = clearFixedArtists;
   $("#addBattingSceneButton").onclick = addBattingScene;
   $("#startBattingButton").onclick = startBattingTest;
+  $("#stopBattingButton").onclick = stopBattingTest;
   $("#basePresetAllButton").onclick = () => openPresetPicker("base");
   $("#charPresetAllButton").onclick = () => openPresetPicker("character");
   $("#addCategoryButton").onclick = addCategory;
