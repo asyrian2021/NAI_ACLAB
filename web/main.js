@@ -628,6 +628,8 @@ function renderHistory() {
     row.className = "history-list-row";
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
+    checkbox.className = "history-select-checkbox";
+    checkbox.dataset.historyId = history.id;
     checkbox.checked = selectedHistoryIds.has(history.id);
     checkbox.onchange = () => {
       if (checkbox.checked) selectedHistoryIds.add(history.id);
@@ -662,6 +664,15 @@ function renderHistory() {
   (history.items || []).forEach((item, index) => {
     detail.appendChild(renderImageCard(item, { history, label: `#${index + 1}`, modalItems }));
   });
+}
+
+function syncSelectedHistoryIdsFromDom() {
+  selectedHistoryIds = new Set(
+    $$("#historyList .history-select-checkbox")
+      .filter((checkbox) => checkbox.checked)
+      .map((checkbox) => checkbox.dataset.historyId)
+      .filter(Boolean)
+  );
 }
 
 function compareItems() {
@@ -1095,7 +1106,32 @@ async function stopBattingTest() {
   });
 }
 
+function setGenerationRunning(running, cancelling = false) {
+  const topButton = $("#generateButton");
+  const inlineButton = $("#generateButtonInline");
+  const previewButton = $("#previewButton");
+  const stopButton = $("#stopGenerateButton");
+  if (topButton) topButton.disabled = running;
+  if (inlineButton) inlineButton.disabled = running;
+  if (previewButton) previewButton.disabled = running;
+  if (stopButton) {
+    stopButton.disabled = !running || cancelling;
+    stopButton.textContent = cancelling ? "중지 중" : "생성 중지";
+  }
+}
+
+async function stopGeneration() {
+  if (!activeJobs.generate) return;
+  $("#stopGenerateButton").disabled = true;
+  $("#progressText").textContent = "중지 요청";
+  await request("/api/job/cancel", {
+    method: "POST",
+    body: JSON.stringify({ job_id: activeJobs.generate }),
+  });
+}
+
 async function deleteSelectedHistory() {
+  syncSelectedHistoryIdsFromDom();
   if (!selectedHistoryIds.size) {
     setSaveState("삭제할 히스토리를 선택하세요");
     return;
@@ -1181,15 +1217,23 @@ async function startGeneration() {
   syncEditorsToState();
   if (!confirmCustomEndpointTokenUse()) return;
   setProgressActive(true);
+  setGenerationRunning(true);
   $("#jobLog").textContent = "생성 작업을 시작합니다...\n";
   if (currentFixedArtists().length) $("#jobLog").textContent = "고정 작가가중치로 생성 작업을 시작합니다...\n";
   liveItems = [];
   renderLiveGallery();
-  const data = await request("/api/generate", {
-    method: "POST",
-    body: JSON.stringify({ state: generationStateForRequest() }),
-  });
-  pollJob(data.job_id, jobTargets("generate"));
+  try {
+    const data = await request("/api/generate", {
+      method: "POST",
+      body: JSON.stringify({ state: generationStateForRequest() }),
+    });
+    activeJobs.generate = data.job_id;
+    pollJob(data.job_id, jobTargets("generate"));
+  } catch (error) {
+    setGenerationRunning(false);
+    $("#progressText").textContent = "실패";
+    $("#jobLog").textContent += `시작 실패: ${error.message}\n`;
+  }
 }
 
 function jobTargets(kind) {
@@ -1215,6 +1259,7 @@ function jobTargets(kind) {
     progressText: "#progressText",
     progressCount: "#progressCount",
     progressBar: "#progressBar",
+    stopButton: "#stopGenerateButton",
   };
 }
 
@@ -1241,6 +1286,9 @@ async function pollJob(jobId, targets = jobTargets("generate")) {
   if (targets.kind === "batting") {
     activeJobs.batting = terminal ? null : jobId;
     setBattingRunning(!terminal, job.status === "cancelling");
+  } else if (targets.kind === "generate") {
+    activeJobs.generate = terminal ? null : jobId;
+    setGenerationRunning(!terminal, job.status === "cancelling");
   }
   if (!terminal) {
     setTimeout(() => pollJob(jobId, targets), 900);
@@ -1249,6 +1297,9 @@ async function pollJob(jobId, targets = jobTargets("generate")) {
     if (targets.kind === "batting") {
       activeJobs.batting = null;
       setBattingRunning(false);
+    } else if (targets.kind === "generate") {
+      activeJobs.generate = null;
+      setGenerationRunning(false);
     }
     await loadState();
     switchTab(targets.finalTab);
@@ -1460,6 +1511,7 @@ function deleteChar() {
 function bindAutosaveInputs(root = document) {
   root.querySelectorAll("input, textarea, select").forEach((node) => {
     if (node.id === "compareHistorySelect") return;
+    if (node.id === "deleteFilesToggle" || node.closest("#historyList")) return;
     if (node.id === "api_token") {
       node.oninput = null;
       node.onchange = () => {
@@ -1519,6 +1571,7 @@ function bindEvents() {
   $("#previewButton").onclick = previewPrompt;
   $("#generateButton").onclick = startGeneration;
   $("#generateButtonInline").onclick = startGeneration;
+  $("#stopGenerateButton").onclick = stopGeneration;
   $("#clearFixedArtistsButton").onclick = clearFixedArtists;
   $("#addBattingSceneButton").onclick = addBattingScene;
   $("#startBattingButton").onclick = startBattingTest;
