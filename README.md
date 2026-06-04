@@ -25,7 +25,7 @@ GitHub에서 처음 받은 뒤에는 프로젝트 폴더에서 위 명령을 실
 npm 패키지로 공개한 뒤에는 아래처럼 바로 실행할 수 있습니다.
 
 ```powershell
-npx nai-artist-combination-lab
+npx nai-aclab
 ```
 
 ### Windows 배포판

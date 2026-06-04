@@ -32,6 +32,7 @@ function printHelp() {
   console.log(`NAI Artist Combination Lab ${packageJson.version}
 
 Usage:
+  nai-aclab
   nai-artist-lab
   npm start
 
