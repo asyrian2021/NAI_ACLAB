@@ -192,6 +192,23 @@ p {
   background: rgba(255, 107, 122, 0.08);
 }
 
+.primary-button:disabled,
+.ghost-button:disabled,
+.danger-button:disabled,
+.icon-button:disabled,
+.mini-button:disabled {
+  color: #858b95;
+  border-color: rgba(140, 146, 158, 0.2);
+  background: rgba(116, 122, 134, 0.16);
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.primary-button:disabled {
+  background: linear-gradient(135deg, #4f5661, #3b414b);
+}
+
 .icon-button {
   width: 38px;
   padding: 0;

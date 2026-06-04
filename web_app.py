@@ -45,6 +45,7 @@ WEB_DIR = APP_DIR / "web"
 JOBS: dict[str, dict] = {}
 STATE_LOCK = threading.Lock()
 LOCAL_API_TOKEN = secrets.token_urlsafe(32)
+ACTIVE_JOB_STATUSES = {"queued", "running", "cancelling"}
 
 
 def dataclass_from_dict(cls, data: dict):
@@ -252,6 +253,10 @@ def clear_history(delete_files: bool) -> AppState:
         state = load_state()
         ids = [item.get("id", "") for item in state.history]
     return delete_history_entries(ids, delete_files)
+
+
+def active_job() -> dict | None:
+    return next((job for job in JOBS.values() if job.get("status") in ACTIVE_JOB_STATUSES), None)
 
 
 def run_generation(job_id: str, state: AppState) -> None:
@@ -518,6 +523,9 @@ class Handler(BaseHTTPRequestHandler):
             prompt, negative, uc_prompt, artists = build_prompt(state)
             self.send_json({"prompt": prompt, "negative": negative, "uc": uc_prompt, "artists": artists})
         elif route == "/api/generate":
+            if active_job():
+                self.send_json({"error": "이미 생성 작업이 진행 중입니다."}, status=409)
+                return
             state = save_incoming_state(data.get("state", data))
             job_id = f"job_{int(time.time() * 1000)}"
             JOBS[job_id] = {"id": job_id, "status": "queued", "progress": 0, "total": state.generation.count, "log": []}
@@ -525,6 +533,9 @@ class Handler(BaseHTTPRequestHandler):
             thread.start()
             self.send_json({"job_id": job_id})
         elif route == "/api/batting/generate":
+            if active_job():
+                self.send_json({"error": "이미 생성 작업이 진행 중입니다."}, status=409)
+                return
             state = save_incoming_state(data.get("state", data))
             total = sum(scene_count(scene) for scene in state.batting_scenes)
             job_id = f"job_{int(time.time() * 1000)}"

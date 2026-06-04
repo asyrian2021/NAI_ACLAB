@@ -28,6 +28,7 @@ let modalDragging = false;
 let modalDragStart = { x: 0, y: 0, panX: 0, panY: 0 };
 let presetPickerKind = null;
 let activeJobs = { generate: null, batting: null };
+const pendingJobId = "__pending__";
 
 const pageCopy = {
   generate: ["생성", "프리셋, 작가 조합, 생성 상태를 한 화면에서 조정합니다."],
@@ -1052,19 +1053,13 @@ function battingStateForRequest() {
 }
 
 function setBattingRunning(running, cancelling = false) {
-  const startButton = $("#startBattingButton");
-  const addButton = $("#addBattingSceneButton");
-  const stopButton = $("#stopBattingButton");
-  if (startButton) startButton.disabled = running;
-  if (addButton) addButton.disabled = running;
-  if (stopButton) {
-    stopButton.disabled = !running || cancelling;
-    stopButton.textContent = cancelling ? "중지 중" : "생성 중지";
-  }
+  activeJobs.batting = running ? activeJobs.batting || pendingJobId : null;
+  updateJobActionButtons(cancelling ? "batting" : "");
 }
 
 async function startBattingTest() {
   syncEditorsToState();
+  if (hasActiveJob()) return;
   if (!confirmCustomEndpointTokenUse()) return;
   if (!currentFixedArtists().length) {
     window.alert("타율 테스트는 작가태그 가중치를 고정한 상태에서 실행하는 기능입니다. 먼저 히스토리나 가중치 비교에서 가중치를 불러와 주세요.");
@@ -1107,16 +1102,41 @@ async function stopBattingTest() {
 }
 
 function setGenerationRunning(running, cancelling = false) {
+  activeJobs.generate = running ? activeJobs.generate || pendingJobId : null;
+  updateJobActionButtons(cancelling ? "generate" : "");
+}
+
+function hasActiveJob() {
+  return Boolean(activeJobs.generate || activeJobs.batting);
+}
+
+function isPendingJob(jobId) {
+  return jobId === pendingJobId;
+}
+
+function updateJobActionButtons(cancellingKind = "") {
+  const generateRunning = Boolean(activeJobs.generate);
+  const battingRunning = Boolean(activeJobs.batting);
+  const busy = generateRunning || battingRunning;
   const topButton = $("#generateButton");
   const inlineButton = $("#generateButtonInline");
   const previewButton = $("#previewButton");
-  const stopButton = $("#stopGenerateButton");
-  if (topButton) topButton.disabled = running;
-  if (inlineButton) inlineButton.disabled = running;
-  if (previewButton) previewButton.disabled = running;
-  if (stopButton) {
-    stopButton.disabled = !running || cancelling;
-    stopButton.textContent = cancelling ? "중지 중" : "생성 중지";
+  const stopGenerateButton = $("#stopGenerateButton");
+  const startBattingButton = $("#startBattingButton");
+  const addBattingButton = $("#addBattingSceneButton");
+  const stopBattingButton = $("#stopBattingButton");
+  if (topButton) topButton.disabled = busy;
+  if (inlineButton) inlineButton.disabled = busy;
+  if (previewButton) previewButton.disabled = busy;
+  if (startBattingButton) startBattingButton.disabled = busy;
+  if (addBattingButton) addBattingButton.disabled = busy;
+  if (stopGenerateButton) {
+    stopGenerateButton.disabled = !generateRunning || isPendingJob(activeJobs.generate) || cancellingKind === "generate";
+    stopGenerateButton.textContent = cancellingKind === "generate" ? "중지 중" : "생성 중지";
+  }
+  if (stopBattingButton) {
+    stopBattingButton.disabled = !battingRunning || isPendingJob(activeJobs.batting) || cancellingKind === "batting";
+    stopBattingButton.textContent = cancellingKind === "batting" ? "중지 중" : "생성 중지";
   }
 }
 
@@ -1215,6 +1235,7 @@ function confirmCustomEndpointTokenUse() {
 
 async function startGeneration() {
   syncEditorsToState();
+  if (hasActiveJob()) return;
   if (!confirmCustomEndpointTokenUse()) return;
   setProgressActive(true);
   setGenerationRunning(true);
@@ -1546,6 +1567,7 @@ function switchTab(tab) {
   $("#pageTitle").textContent = pageCopy[tab][0];
   $("#pageSubtitle").textContent = pageCopy[tab][1];
   $("#generateButton").hidden = tab !== "generate";
+  updateJobActionButtons();
 }
 
 async function loadState() {
@@ -1561,6 +1583,7 @@ async function loadState() {
   renderAll();
   bindAutosaveInputs(document);
   switchTab(currentTab);
+  updateJobActionButtons();
   await previewPrompt();
 }
 
