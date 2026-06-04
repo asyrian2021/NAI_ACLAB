@@ -839,7 +839,6 @@ function renderImageModalItem(item) {
   const position = modalItems.length > 1 ? ` (${modalIndex + 1} / ${modalItems.length})` : "";
   $("#modalTitle").textContent = `${item.source_label || item.created_at || "이미지"}${position}`;
   $("#modalSubtitle").textContent = [item.source_base_preset, item.source_character_preset].filter(Boolean).join(" + ");
-  $("#modalPrompt").textContent = item.prompt || "";
   const artistList = $("#modalArtists");
   artistList.innerHTML = "";
   for (const row of artistWeightRows(item.artists || [])) artistList.appendChild(row);

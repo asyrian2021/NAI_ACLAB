@@ -29,10 +29,13 @@ from app import (
     load_api_token,
     load_state,
     now_id,
+    output_ref,
     parse_artist_tags,
     safe_path_name,
     save_api_token,
     save_state,
+    sanitize_history_entry,
+    sanitize_history_item,
     weight_tag,
 )
 
@@ -75,7 +78,9 @@ def state_from_dict(data: dict) -> AppState:
 
 def media_url(path: str) -> str:
     try:
-        rel = Path(path).resolve().relative_to(OUTPUT_DIR.resolve())
+        raw = str(path or "")
+        candidate = Path(raw)
+        rel = candidate.resolve().relative_to(OUTPUT_DIR.resolve()) if candidate.is_absolute() else Path(raw)
     except (ValueError, OSError):
         return ""
     return "/media/" + urllib.parse.quote(str(rel).replace("\\", "/"))
@@ -85,19 +90,18 @@ def state_payload(state: AppState) -> dict:
     data = asdict(state)
     data.setdefault("api", {})["token"] = ""
     data["api"]["token_saved"] = has_saved_api_token()
+    data["history"] = [sanitize_history_entry(item) for item in data.get("history", [])]
     for category in data.get("categories", []):
         category["recognized_tags"] = parse_artist_tags(category.get("tags", []))
     for history in data.get("history", []):
         for item in history.get("items", []):
             item["image_url"] = media_url(item.get("path", ""))
-            item["request_url"] = media_url(item.get("request_path", ""))
     return data
 
 
 def item_payload(item: dict) -> dict:
-    data = dict(item)
+    data = sanitize_history_item(item)
     data["image_url"] = media_url(data.get("path", ""))
-    data["request_url"] = media_url(data.get("request_path", ""))
     return data
 
 
@@ -218,7 +222,8 @@ def delete_history_entries(ids: list[str], delete_files: bool) -> AppState:
             if not raw_dir:
                 continue
             try:
-                target = Path(raw_dir).resolve()
+                raw_path = Path(raw_dir)
+                target = raw_path.resolve() if raw_path.is_absolute() else (OUTPUT_DIR / raw_path).resolve()
             except OSError:
                 continue
             if target == output_root or output_root not in target.parents:
@@ -255,11 +260,7 @@ def run_generation(job_id: str, state: AppState) -> None:
         prompt, negative, uc_prompt, artists = build_prompt(state)
         path = out_dir / f"image_{idx + 1:03}.png"
         metadata = {
-            "path": str(path),
-            "request_path": str(path.with_name(path.stem + "_request.json")),
-            "prompt": prompt,
-            "negative_prompt": negative,
-            "uc_prompt": uc_prompt,
+            "path": output_ref(str(path)),
             "artists": artists,
             "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
@@ -277,7 +278,7 @@ def run_generation(job_id: str, state: AppState) -> None:
         "base_preset": base.name if base else "",
         "character_preset": character.name if character else "",
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "output_dir": str(out_dir),
+        "output_dir": output_ref(str(out_dir)),
         "items": items,
     }
     update = {
@@ -357,11 +358,7 @@ def run_batting_test(job_id: str, state: AppState) -> None:
             prompt, negative, uc_prompt, artists = build_prompt(current)
             path = scene_dir / f"image_{image_index + 1:03}.png"
             metadata = {
-                "path": str(path),
-                "request_path": str(path.with_name(path.stem + "_request.json")),
-                "prompt": prompt,
-                "negative_prompt": negative,
-                "uc_prompt": uc_prompt,
+                "path": output_ref(str(path)),
                 "artists": artists,
                 "scene_name": scene_name,
                 "scene_index": scene_index,
@@ -387,7 +384,7 @@ def run_batting_test(job_id: str, state: AppState) -> None:
         "base_preset": "타율 테스트",
         "character_preset": f"{len(scenes)}개 씬",
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "output_dir": str(out_dir),
+        "output_dir": output_ref(str(out_dir)),
         "scenes": [asdict(scene) for scene in scenes],
         "items": items,
     }

@@ -116,12 +116,54 @@ def has_saved_api_token() -> bool:
     return bool(load_api_token().strip())
 
 
+def cleanup_saved_request_jsons() -> None:
+    try:
+        for path in OUTPUT_DIR.rglob("*_request.json"):
+            if path.is_file():
+                path.unlink()
+    except OSError:
+        pass
+
+
 def state_dict_without_secrets(state: AppState | dict) -> dict:
     data = asdict(state) if not isinstance(state, dict) else dict(state)
     api = dict(data.get("api", {}) or {})
     api["token"] = ""
     data["api"] = api
+    data["history"] = [sanitize_history_entry(item) for item in data.get("history", [])]
     return data
+
+
+def output_ref(path_value: str) -> str:
+    raw = str(path_value or "").strip()
+    if not raw:
+        return ""
+    path = Path(raw)
+    try:
+        if path.is_absolute():
+            return str(path.resolve().relative_to(OUTPUT_DIR.resolve())).replace("\\", "/")
+    except (OSError, ValueError):
+        return path.name
+    return raw.replace("\\", "/")
+
+
+def sanitize_history_item(item: dict) -> dict:
+    clean = {
+        key: value
+        for key, value in dict(item or {}).items()
+        if key not in {"prompt", "negative_prompt", "uc_prompt", "request_path", "request_url"}
+    }
+    if "path" in clean:
+        clean["path"] = output_ref(clean.get("path", ""))
+    return clean
+
+
+def sanitize_history_entry(history: dict) -> dict:
+    clean = dict(history or {})
+    if "output_dir" in clean:
+        clean["output_dir"] = output_ref(clean.get("output_dir", ""))
+    clean["items"] = [sanitize_history_item(item) for item in clean.get("items", [])]
+    return clean
 
 
 def now_id() -> str:
@@ -303,6 +345,7 @@ def default_state() -> AppState:
 
 def load_state() -> AppState:
     ensure_dirs()
+    cleanup_saved_request_jsons()
     if not STATE_PATH.exists():
         state = default_state()
         state.api.token = load_api_token()
@@ -330,6 +373,12 @@ def load_state() -> AppState:
         )
     if api_data.get("user_agent") in (None, "", "NAIArtistCombination/0.1"):
         api_data["user_agent"] = DEFAULT_USER_AGENT
+    sanitized_data = state_dict_without_secrets(data)
+    if sanitized_data != data:
+        STATE_PATH.write_text(
+            json.dumps(sanitized_data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
     api_data["token"] = load_api_token()
     return AppState(
         categories=[Category(**item) for item in data.get("categories", [])],
@@ -341,7 +390,7 @@ def load_state() -> AppState:
         api=ApiSettings(**api_data),
         generation=GenerationSettings(**data.get("generation", {})),
         batting_scenes=[BattingScene(**item) for item in data.get("batting_scenes", [])],
-        history=data.get("history", []),
+        history=[sanitize_history_entry(item) for item in data.get("history", [])],
     )
 
 
@@ -425,8 +474,6 @@ class NovelAIClient:
             return
 
         payload = self.build_payload(prompt, negative_prompt, uc_prompt)
-        request_path = output_path.with_name(output_path.stem + "_request.json")
-        request_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         req = urllib.request.Request(
             self.settings.endpoint,
             data=json.dumps(payload).encode("utf-8"),
@@ -1224,11 +1271,7 @@ class App(tk.Tk if tk else object):
             prompt, negative, uc_prompt, artists = self.build_prompt()
             path = out_dir / f"image_{idx + 1:03}.png"
             metadata = {
-                "path": str(path),
-                "request_path": str(path.with_name(path.stem + "_request.json")),
-                "prompt": prompt,
-                "negative_prompt": negative,
-                "uc_prompt": uc_prompt,
+                "path": output_ref(str(path)),
                 "artists": artists,
                 "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
