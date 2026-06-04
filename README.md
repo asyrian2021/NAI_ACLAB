@@ -1,11 +1,9 @@
 # NAI Artist Combination Lab
 
-NovelAI 이미지 생성에서 작가 태그 조합과 가중치를 실험하기 위한 로컬 웹앱입니다.  
+NovelAI 이미지 생성에서 작가 태그 조합과 가중치를 실험하기 위한 브라우저 기반 웹앱입니다.  
 작가 태그의 가중치를 랜덤하게 바꿔 여러 이미지를 만들고, 마음에 드는 결과에서 작가 가중치를 다시 불러와 고정한 뒤 여러 프리셋 조합을 테스트할 수 있습니다.
 
 ## 설치와 실행
-
-### npm으로 실행
 
 필요한 것:
 
@@ -15,32 +13,17 @@ NovelAI 이미지 생성에서 작가 태그 조합과 가중치를 실험하기
 실행 방법:
 
 ```powershell
-npm start
-```
-
-GitHub에서 처음 받은 뒤에는 프로젝트 폴더에서 위 명령을 실행하면 됩니다. 브라우저가 자동으로 열리고, 앱 사용을 마친 뒤 안내 창을 닫으면 서버가 종료됩니다.
-
-npm 패키지로 공개한 뒤에는 아래처럼 바로 실행할 수 있습니다.
-
-```powershell
 npx nai-aclab
 ```
 
-### Python으로 직접 실행
+브라우저가 자동으로 열리고, 앱 사용을 마친 뒤 안내 창을 닫으면 서버가 종료됩니다.
 
-Python 3.10 이상이 설치되어 있다면 npm 없이도 소스 코드로 실행할 수 있습니다.
-
-```powershell
-python launcher.py
-```
-
-브라우저 서버만 직접 실행하려면 아래 명령을 사용합니다.
+자주 사용한다면 전역 설치 후 실행할 수도 있습니다.
 
 ```powershell
-python web_app.py
+npm install -g nai-aclab
+nai-aclab
 ```
-
-기본 주소는 `http://127.0.0.1:8765`입니다.
 
 ## 기본 사용 흐름
 
@@ -140,12 +123,7 @@ override가 입력되어 있으면 모든 프리셋 조합에서 override 값을
 
 ## 저장 위치
 
-소스/Python 실행 시:
-
-- 앱 상태: `data/app_state.json`
-- 생성 이미지와 요청 JSON: `outputs/`
-
-`npm start` 실행 시:
+앱 상태, 생성 이미지, 요청 JSON은 아래 위치에 저장됩니다.
 
 - Windows: `%APPDATA%\NAI Artist Combination Lab`
 - macOS: `~/Library/Application Support/NAI Artist Combination Lab`
