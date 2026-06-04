@@ -32,6 +32,7 @@ USER_DIR = Path(
 DATA_DIR = USER_DIR / "data"
 OUTPUT_DIR = USER_DIR / "outputs"
 STATE_PATH = DATA_DIR / "app_state.json"
+TOKEN_SECRET_PATH = DATA_DIR / ("api_token.dpapi" if os.name == "nt" else "api_token.secret")
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -42,6 +43,85 @@ DEFAULT_USER_AGENT = (
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _windows_protect(data: bytes) -> bytes:
+    import ctypes
+    from ctypes import wintypes
+
+    class DataBlob(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+
+    crypt32 = ctypes.windll.crypt32
+    kernel32 = ctypes.windll.kernel32
+    buffer = ctypes.create_string_buffer(data)
+    in_blob = DataBlob(len(data), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_byte)))
+    out_blob = DataBlob()
+    if not crypt32.CryptProtectData(ctypes.byref(in_blob), None, None, None, None, 0, ctypes.byref(out_blob)):
+        raise OSError("Failed to protect API token with Windows DPAPI.")
+    try:
+        return ctypes.string_at(out_blob.pbData, out_blob.cbData)
+    finally:
+        kernel32.LocalFree(out_blob.pbData)
+
+
+def _windows_unprotect(data: bytes) -> bytes:
+    import ctypes
+    from ctypes import wintypes
+
+    class DataBlob(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+
+    crypt32 = ctypes.windll.crypt32
+    kernel32 = ctypes.windll.kernel32
+    buffer = ctypes.create_string_buffer(data)
+    in_blob = DataBlob(len(data), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_byte)))
+    out_blob = DataBlob()
+    if not crypt32.CryptUnprotectData(ctypes.byref(in_blob), None, None, None, None, 0, ctypes.byref(out_blob)):
+        raise OSError("Failed to unprotect API token with Windows DPAPI.")
+    try:
+        return ctypes.string_at(out_blob.pbData, out_blob.cbData)
+    finally:
+        kernel32.LocalFree(out_blob.pbData)
+
+
+def save_api_token(token: str) -> None:
+    token = token.strip()
+    if not token:
+        return
+    ensure_dirs()
+    raw = token.encode("utf-8")
+    payload = _windows_protect(raw) if os.name == "nt" else raw
+    TOKEN_SECRET_PATH.write_bytes(payload)
+    if os.name != "nt":
+        try:
+            TOKEN_SECRET_PATH.chmod(0o600)
+        except OSError:
+            pass
+
+
+def load_api_token() -> str:
+    try:
+        payload = TOKEN_SECRET_PATH.read_bytes()
+    except OSError:
+        return ""
+    try:
+        raw = _windows_unprotect(payload) if os.name == "nt" else payload
+        return raw.decode("utf-8")
+    except Exception:
+        return ""
+
+
+def has_saved_api_token() -> bool:
+    return bool(load_api_token().strip())
+
+
+def state_dict_without_secrets(state: AppState | dict) -> dict:
+    data = asdict(state) if not isinstance(state, dict) else dict(state)
+    api = dict(data.get("api", {}) or {})
+    api["token"] = ""
+    data["api"] = api
+    return data
 
 
 def now_id() -> str:
@@ -224,7 +304,9 @@ def default_state() -> AppState:
 def load_state() -> AppState:
     ensure_dirs()
     if not STATE_PATH.exists():
-        return default_state()
+        state = default_state()
+        state.api.token = load_api_token()
+        return state
     data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
     base_data = data.get("base_presets", [])
     quality_override = data.get("quality_override_prompt", "")
@@ -237,9 +319,18 @@ def load_state() -> AppState:
             else next((item for item in base_data if item.get("quality_override_prompt")), None)
         )
         quality_override = (fallback_base or {}).get("quality_override_prompt", "")
-    api_data = data.get("api", {})
+    api_data = dict(data.get("api", {}) or {})
+    legacy_token = str(api_data.pop("token", "") or "").strip()
+    if legacy_token and not has_saved_api_token():
+        save_api_token(legacy_token)
+        data["api"] = api_data
+        STATE_PATH.write_text(
+            json.dumps(state_dict_without_secrets(data), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
     if api_data.get("user_agent") in (None, "", "NAIArtistCombination/0.1"):
         api_data["user_agent"] = DEFAULT_USER_AGENT
+    api_data["token"] = load_api_token()
     return AppState(
         categories=[Category(**item) for item in data.get("categories", [])],
         base_presets=[PromptPreset(**item) for item in base_data],
@@ -257,7 +348,7 @@ def load_state() -> AppState:
 def save_state(state: AppState) -> None:
     ensure_dirs()
     STATE_PATH.write_text(
-        json.dumps(asdict(state), ensure_ascii=False, indent=2),
+        json.dumps(state_dict_without_secrets(state), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 

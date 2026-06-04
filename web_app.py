@@ -25,10 +25,13 @@ from app import (
     NovelAIClient,
     PromptPreset,
     float_range,
+    has_saved_api_token,
+    load_api_token,
     load_state,
     now_id,
     parse_artist_tags,
     safe_path_name,
+    save_api_token,
     save_state,
     weight_tag,
 )
@@ -80,6 +83,8 @@ def media_url(path: str) -> str:
 
 def state_payload(state: AppState) -> dict:
     data = asdict(state)
+    data.setdefault("api", {})["token"] = ""
+    data["api"]["token_saved"] = has_saved_api_token()
     for category in data.get("categories", []):
         category["recognized_tags"] = parse_artist_tags(category.get("tags", []))
     for history in data.get("history", []):
@@ -186,6 +191,12 @@ def build_prompt(state: AppState) -> tuple[str, str, str, list[dict]]:
 
 def save_incoming_state(data: dict) -> AppState:
     state = state_from_dict(data)
+    incoming_token = str((data.get("api", {}) or {}).get("token", "") or "").strip()
+    if incoming_token:
+        save_api_token(incoming_token)
+        state.api.token = incoming_token
+    else:
+        state.api.token = load_api_token()
     with STATE_LOCK:
         current = load_state()
         state.history = current.history

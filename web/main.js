@@ -534,8 +534,13 @@ function renderSettings() {
     const wrap = document.createElement("label");
     wrap.innerHTML = `<span>${label}</span><input id="api_${key}" type="${type}" />`;
     form.appendChild(wrap);
-    $(`#api_${key}`).value = state.api[key] ?? "";
-    if (type === "number") $(`#api_${key}`).step = "any";
+    const input = $(`#api_${key}`);
+    input.value = key === "token" ? "" : state.api[key] ?? "";
+    if (key === "token") {
+      input.placeholder = state.api.token_saved ? "저장된 토큰을 사용합니다" : "API 토큰을 입력하세요";
+      input.autocomplete = "off";
+    }
+    if (type === "number") input.step = "any";
   }
   $("#mockMode").checked = !!state.api.mock_mode;
   $("#negativePrompt").value = state.negative_prompt || "";
@@ -1431,6 +1436,14 @@ function deleteChar() {
 function bindAutosaveInputs(root = document) {
   root.querySelectorAll("input, textarea, select").forEach((node) => {
     if (node.id === "compareHistorySelect") return;
+    if (node.id === "api_token") {
+      node.oninput = null;
+      node.onchange = () => {
+        syncEditorsToState();
+        scheduleSave();
+      };
+      return;
+    }
     node.oninput = () => {
       syncEditorsToState();
       if (node.id === "catTags") renderRecognizedTags();
