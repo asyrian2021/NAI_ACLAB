@@ -47,10 +47,29 @@ const apiFields = [
   ["steps", "Steps", "number"],
   ["scale", "Scale", "number"],
   ["guidance_rescale", "Guidance Rescale", "number"],
-  ["sampler", "Sampler", "text"],
-  ["noise_schedule", "Noise Schedule", "text"],
+  ["sampler", "Sampler", "select"],
+  ["noise_schedule", "Noise Schedule", "select"],
   ["seed", "Seed (-1=random)", "number"],
 ];
+
+const apiSelectOptions = {
+  sampler: [
+    ["k_euler_ancestral", "Euler Ancestral"],
+    ["k_euler", "Euler"],
+    ["k_dpmpp_2m", "DPM++ 2M"],
+    ["k_dpmpp_2s_ancestral", "DPM++ 2S Ancestral"],
+    ["k_dpmpp_sde", "DPM++ SDE"],
+    ["k_dpm_2", "DPM2"],
+    ["k_dpm_fast", "DPM Fast"],
+    ["ddim_v3", "DDIM"],
+  ],
+  noise_schedule: [
+    ["karras", "Karras"],
+    ["native", "Native"],
+    ["exponential", "Exponential"],
+    ["polyexponential", "Polyexponential"],
+  ],
+};
 
 const imageSizeOptions = {
   portrait: { label: "Normal Portrait", width: 832, height: 1216 },
@@ -211,6 +230,7 @@ function syncBattingScenesToState() {
     name: row.querySelector(".batting-scene-name")?.value.trim() || `Scene ${index + 1}`,
     base_preset: row.querySelector(".batting-scene-base")?.value || "",
     character_preset: row.querySelector(".batting-scene-character")?.value || "",
+    image_size: normalizeImageSizeKey(row.querySelector(".batting-scene-size")?.value || state.generation?.image_size || "portrait"),
     count: Math.max(1, Number(row.querySelector(".batting-scene-count")?.value || 2)),
   }));
 }
@@ -239,6 +259,21 @@ function fillImageSizeSelect() {
   }
   const saved = state.generation.image_size;
   select.value = imageSizeOptions[saved] ? saved : "portrait";
+}
+
+function normalizeImageSizeKey(value, fallback = "portrait") {
+  if (imageSizeOptions[value]) return value;
+  return imageSizeOptions[fallback] ? fallback : "portrait";
+}
+
+function imageSizeOptionsHtml(selectedKey) {
+  const selected = normalizeImageSizeKey(selectedKey);
+  return Object.entries(imageSizeOptions)
+    .map(([key, option]) => {
+      const label = `${option.label}: ${option.width} x ${option.height}`;
+      return `<option value="${key}" ${key === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
+    })
+    .join("");
 }
 
 function applyImageSizeToState(requestState) {
@@ -420,11 +455,13 @@ function renderBatting() {
   state.batting_scenes.forEach((scene, index) => {
     const row = document.createElement("article");
     row.className = "batting-scene-row";
+    const sceneSize = normalizeImageSizeKey(scene.image_size || state.generation?.image_size || "portrait");
     row.innerHTML = `
       <div class="batting-scene-number">${index + 1}</div>
       <label><span>씬 이름</span><input class="batting-scene-name" value="${escapeHtml(scene.name || `Scene ${index + 1}`)}" /></label>
       <label><span>베이스 + 퀄리티</span><select class="batting-scene-base">${selectOptionsHtml(state.base_presets, scene.base_preset)}</select></label>
       <label><span>캐릭터</span><select class="batting-scene-character">${selectOptionsHtml(state.character_presets, scene.character_preset)}</select></label>
+      <label><span>이미지 해상도</span><select class="batting-scene-size">${imageSizeOptionsHtml(sceneSize)}</select></label>
       <label><span>생성 개수</span><input class="batting-scene-count" type="number" min="1" max="200" value="${Math.max(1, Number(scene.count || 2))}" /></label>
       <button class="icon-button batting-scene-delete" type="button" title="씬 삭제">×</button>
     `;
@@ -539,10 +576,30 @@ function renderSettings() {
   form.innerHTML = "";
   for (const [key, label, type] of apiFields) {
     const wrap = document.createElement("label");
-    wrap.innerHTML = `<span>${label}</span><input id="api_${key}" type="${type}" />`;
+    if (type === "select") {
+      wrap.innerHTML = `<span>${label}</span><select id="api_${key}"></select>`;
+    } else {
+      wrap.innerHTML = `<span>${label}</span><input id="api_${key}" type="${type}" />`;
+    }
     form.appendChild(wrap);
     const input = $(`#api_${key}`);
-    input.value = key === "token" ? "" : state.api[key] ?? "";
+    if (type === "select") {
+      input.innerHTML = (apiSelectOptions[key] || [])
+        .map(([value, optionLabel]) => `<option value="${escapeHtml(value)}">${escapeHtml(optionLabel)}</option>`)
+        .join("");
+      const saved = state.api[key] ?? "";
+      if (Array.from(input.options).some((option) => option.value === saved)) {
+        input.value = saved;
+      } else if (saved) {
+        const custom = document.createElement("option");
+        custom.value = saved;
+        custom.textContent = `${saved} (custom)`;
+        input.appendChild(custom);
+        input.value = saved;
+      }
+    } else {
+      input.value = key === "token" ? "" : state.api[key] ?? "";
+    }
     if (key === "token") {
       input.placeholder = state.api.token_saved ? "저장된 토큰을 사용합니다" : "API 토큰을 입력하세요";
       input.autocomplete = "off";
@@ -1047,6 +1104,7 @@ function addBattingScene() {
     name: uniqueName(state.batting_scenes, `Scene ${nextIndex}`),
     base_preset: state.generation.base_preset || state.base_presets[0]?.name || "",
     character_preset: state.generation.character_preset || state.character_presets[0]?.name || "",
+    image_size: normalizeImageSizeKey(state.generation.image_size || "portrait"),
     count: 2,
   });
   renderBatting();
@@ -1594,7 +1652,6 @@ function switchTab(tab) {
   $$(".tab-page").forEach((page) => page.classList.toggle("active", page.id === tab));
   $("#pageTitle").textContent = pageCopy[tab][0];
   $("#pageSubtitle").textContent = pageCopy[tab][1];
-  $("#generateButton").hidden = tab !== "generate";
   updateJobActionButtons();
 }
 
@@ -1603,6 +1660,12 @@ async function loadState() {
   state = data.state;
   state.quality_override_prompt = state.quality_override_prompt || "";
   state.batting_scenes = state.batting_scenes || [];
+  state.generation = state.generation || {};
+  state.generation.image_size = normalizeImageSizeKey(state.generation.image_size || "portrait");
+  state.batting_scenes = state.batting_scenes.map((scene) => ({
+    ...scene,
+    image_size: normalizeImageSizeKey(scene.image_size || state.generation.image_size),
+  }));
   selectedHistoryIds = new Set(Array.from(selectedHistoryIds).filter((id) => state.history.some((item) => item.id === id)));
   categoryIndex = Math.min(categoryIndex, Math.max(0, state.categories.length - 1));
   baseIndex = Math.min(baseIndex, Math.max(0, state.base_presets.length - 1));
@@ -1620,7 +1683,6 @@ function bindEvents() {
   $$(".nav-item").forEach((button) => button.onclick = () => switchTab(button.dataset.tab));
   $("#refreshButton").onclick = loadState;
   $("#previewButton").onclick = previewPrompt;
-  $("#generateButton").onclick = startGeneration;
   $("#generateButtonInline").onclick = startGeneration;
   $("#stopGenerateButton").onclick = stopGeneration;
   $("#clearFixedArtistsButton").onclick = clearFixedArtists;

@@ -316,6 +316,7 @@ class BattingScene:
     name: str = ""
     base_preset: str = ""
     character_preset: str = ""
+    image_size: str = "portrait"
     count: int = 2
 
 

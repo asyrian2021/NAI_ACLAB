@@ -48,6 +48,11 @@ JOBS: dict[str, dict] = {}
 STATE_LOCK = threading.Lock()
 LOCAL_API_TOKEN = secrets.token_urlsafe(32)
 ACTIVE_JOB_STATUSES = {"queued", "running", "cancelling"}
+IMAGE_SIZE_DIMENSIONS = {
+    "portrait": (832, 1216),
+    "landscape": (1216, 832),
+    "square": (1024, 1024),
+}
 
 
 def dataclass_from_dict(cls, data: dict):
@@ -349,6 +354,12 @@ def scene_state(state: AppState, scene: BattingScene) -> AppState:
     request_state = deepcopy(state)
     request_state.generation.base_preset = scene.base_preset
     request_state.generation.character_preset = scene.character_preset
+    image_size = scene.image_size if scene.image_size in IMAGE_SIZE_DIMENSIONS else request_state.generation.image_size
+    if image_size in IMAGE_SIZE_DIMENSIONS:
+        width, height = IMAGE_SIZE_DIMENSIONS[image_size]
+        request_state.generation.image_size = image_size
+        request_state.api.width = width
+        request_state.api.height = height
     request_state.generation.count = scene_count(scene)
     return request_state
 

@@ -406,7 +406,7 @@ pre {
 
 .batting-scene-row {
   display: grid;
-  grid-template-columns: 42px minmax(160px, 1.1fr) minmax(180px, 1fr) minmax(180px, 1fr) 110px 38px;
+  grid-template-columns: 42px minmax(140px, 0.9fr) minmax(170px, 1fr) minmax(170px, 1fr) minmax(190px, 1fr) 100px 38px;
   gap: 10px;
   align-items: end;
   padding: 12px;
