@@ -15,16 +15,16 @@ function userDataDir() {
   }
 
   if (process.platform === "win32") {
-    return path.join(process.env.APPDATA || os.homedir(), "NAI Artist Combination Lab");
+    return path.join(os.homedir(), "Pictures", "NAI Artist Combination Lab");
   }
 
   if (process.platform === "darwin") {
-    return path.join(os.homedir(), "Library", "Application Support", "NAI Artist Combination Lab");
+    return path.join(os.homedir(), "Pictures", "NAI Artist Combination Lab");
   }
 
   return path.join(
-    process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share"),
-    "nai-artist-combination-lab"
+    process.env.XDG_PICTURES_DIR || path.join(os.homedir(), "Pictures"),
+    "NAI Artist Combination Lab"
   );
 }
 

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import random
 import secrets
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -80,15 +82,33 @@ def state_from_dict(data: dict) -> AppState:
 
 
 def media_url(path: str) -> str:
+    resolved = resolve_output_path(path)
+    if not resolved:
+        return ""
     try:
-        raw = str(path or "")
-        candidate = Path(raw)
-        root = OUTPUT_DIR.resolve()
-        resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
-        rel = resolved.relative_to(root)
+        rel = resolved.relative_to(OUTPUT_DIR.resolve())
     except (ValueError, OSError):
         return ""
     return "/media/" + urllib.parse.quote(str(rel).replace("\\", "/"))
+
+
+def resolve_output_path(path: str, expect_dir: bool = False) -> Path | None:
+    raw = str(path or "").strip()
+    if not raw:
+        return None
+    candidate = Path(raw)
+    try:
+        if candidate.is_absolute():
+            resolved = candidate.resolve()
+            resolved.relative_to(OUTPUT_DIR.resolve())
+            return resolved
+        resolved = (OUTPUT_DIR / candidate).resolve()
+        resolved.relative_to(OUTPUT_DIR.resolve())
+        if resolved.exists() or not expect_dir:
+            return resolved
+    except (ValueError, OSError):
+        return None
+    return None
 
 
 def safe_child_path(root: Path, rel: str) -> Path | None:
@@ -99,6 +119,15 @@ def safe_child_path(root: Path, rel: str) -> Path | None:
         return child
     except (ValueError, OSError):
         return None
+
+
+def open_in_file_manager(path: Path) -> None:
+    if os.name == "nt":
+        os.startfile(path)  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        subprocess.Popen(["xdg-open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def state_payload(state: AppState) -> dict:
@@ -236,16 +265,19 @@ def delete_history_entries(ids: list[str], delete_files: bool) -> AppState:
             raw_dir = history.get("output_dir", "")
             if not raw_dir:
                 continue
-            try:
-                raw_path = Path(raw_dir)
-                target = raw_path.resolve() if raw_path.is_absolute() else (OUTPUT_DIR / raw_path).resolve()
-            except OSError:
+            target = resolve_output_path(raw_dir, expect_dir=True)
+            if not target:
                 continue
             if target == output_root or output_root not in target.parents:
                 continue
             if target.exists():
                 shutil.rmtree(target, ignore_errors=True)
     return load_state()
+
+
+def history_by_id(history_id: str) -> dict | None:
+    state = load_state()
+    return next((item for item in state.history if item.get("id") == history_id), None)
 
 
 def clear_history(delete_files: bool) -> AppState:
@@ -561,6 +593,14 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/api/history/clear":
             state = clear_history(bool(data.get("delete_files", False)))
             self.send_json({"state": state_payload(state)})
+        elif route == "/api/history/open":
+            history = history_by_id(str(data.get("id", "")))
+            target = resolve_output_path((history or {}).get("output_dir", ""), expect_dir=True)
+            if not history or not target or not target.exists() or not target.is_dir():
+                self.send_json({"error": "저장 폴더를 찾을 수 없습니다."}, status=404)
+                return
+            open_in_file_manager(target)
+            self.send_json({"ok": True})
         else:
             self.send_error(404)
 

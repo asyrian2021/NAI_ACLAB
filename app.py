@@ -23,12 +23,30 @@ except Exception:
 
 
 APP_DIR = Path(__file__).resolve().parent
-USER_DIR = Path(
-    os.environ.get(
-        "NAI_ARTIST_LAB_USER_DIR",
-        str(APP_DIR),
-    )
-)
+
+
+def default_pictures_dir() -> Path:
+    if os.name != "nt":
+        user_dirs = Path.home() / ".config" / "user-dirs.dirs"
+        try:
+            for line in user_dirs.read_text(encoding="utf-8").splitlines():
+                if line.startswith("XDG_PICTURES_DIR="):
+                    value = line.split("=", 1)[1].strip().strip('"')
+                    value = value.replace("$HOME", str(Path.home()))
+                    return Path(value).expanduser()
+        except OSError:
+            pass
+    return Path.home() / "Pictures"
+
+
+def default_user_dir() -> Path:
+    configured = os.environ.get("NAI_ARTIST_LAB_USER_DIR", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    return default_pictures_dir() / "NAI Artist Combination Lab"
+
+
+USER_DIR = default_user_dir()
 DATA_DIR = USER_DIR / "data"
 OUTPUT_DIR = USER_DIR / "outputs"
 STATE_PATH = DATA_DIR / "app_state.json"
@@ -141,7 +159,8 @@ def output_ref(path_value: str) -> str:
     path = Path(raw)
     try:
         if path.is_absolute():
-            return str(path.resolve().relative_to(OUTPUT_DIR.resolve())).replace("\\", "/")
+            resolved = path.resolve()
+            return str(resolved.relative_to(OUTPUT_DIR.resolve())).replace("\\", "/")
     except (OSError, ValueError):
         return path.name
     return raw.replace("\\", "/")

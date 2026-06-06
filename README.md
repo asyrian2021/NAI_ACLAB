@@ -219,9 +219,16 @@ NovelAI V4+의 멀티 캐릭터 프롬프트는 캐릭터를 쉼표로 합치지
 
 앱 설정과 생성 이미지는 내 컴퓨터에 저장됩니다.
 
-- Windows: `%APPDATA%\NAI Artist Combination Lab`
-- macOS: `~/Library/Application Support/NAI Artist Combination Lab`
-- Linux: `~/.local/share/nai-artist-combination-lab`
+기본적으로 운영체제의 사진/그림 폴더 아래에 앱 폴더를 만들고, 그 안에 설정과 생성 이미지를 함께 저장합니다.
+
+- Windows: `Pictures\NAI Artist Combination Lab`
+- macOS: `~/Pictures/NAI Artist Combination Lab`
+- Linux: `XDG_PICTURES_DIR/NAI Artist Combination Lab`
+
+폴더 안의 구조는 아래처럼 나뉩니다.
+
+- `data`: 앱 설정과 API 토큰 secret 파일
+- `outputs`: 생성된 이미지
 
 API 토큰은 일반 설정 파일에 저장하지 않고 별도 secret store에 저장합니다. 앱 화면으로 다시 내려보내지도 않습니다.
 

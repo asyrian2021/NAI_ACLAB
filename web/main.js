@@ -659,6 +659,21 @@ function renderHistory() {
     detail.innerHTML = `<p>아직 생성 히스토리가 없습니다.</p>`;
     return;
   }
+  const actions = document.createElement("div");
+  actions.className = "history-detail-actions";
+  const info = document.createElement("div");
+  const title = document.createElement("strong");
+  title.textContent = `${history.base_preset || ""} + ${history.character_preset || ""}`;
+  const meta = document.createElement("span");
+  meta.textContent = `${history.created_at || ""} · ${(history.items || []).length}장`;
+  info.append(title, meta);
+  const openButton = document.createElement("button");
+  openButton.className = "ghost-button";
+  openButton.type = "button";
+  openButton.textContent = "저장 폴더 열기";
+  openButton.onclick = () => openHistoryFolder(history);
+  actions.append(info, openButton);
+  detail.appendChild(actions);
   const modalItems = (history.items || [])
     .map((item, index) => enrichedImageItem(item, { history, label: `#${index + 1}` }))
     .filter((item) => item.image_url);
@@ -1186,6 +1201,19 @@ async function clearHistory() {
   renderHistory();
   renderCompare();
   setSaveState("히스토리 전체 삭제됨");
+}
+
+async function openHistoryFolder(history) {
+  if (!history?.id) return;
+  try {
+    await request("/api/history/open", {
+      method: "POST",
+      body: JSON.stringify({ id: history.id }),
+    });
+    setSaveState("저장 폴더를 열었습니다");
+  } catch {
+    setSaveState("저장 폴더를 찾을 수 없습니다");
+  }
 }
 
 function selectAllHistory() {
