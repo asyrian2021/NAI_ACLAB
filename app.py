@@ -25,25 +25,11 @@ except Exception:
 APP_DIR = Path(__file__).resolve().parent
 
 
-def default_pictures_dir() -> Path:
-    if os.name != "nt":
-        user_dirs = Path.home() / ".config" / "user-dirs.dirs"
-        try:
-            for line in user_dirs.read_text(encoding="utf-8").splitlines():
-                if line.startswith("XDG_PICTURES_DIR="):
-                    value = line.split("=", 1)[1].strip().strip('"')
-                    value = value.replace("$HOME", str(Path.home()))
-                    return Path(value).expanduser()
-        except OSError:
-            pass
-    return Path.home() / "Pictures"
-
-
 def default_user_dir() -> Path:
     configured = os.environ.get("NAI_ARTIST_LAB_USER_DIR", "").strip()
     if configured:
         return Path(configured).expanduser()
-    return default_pictures_dir() / "NAI Artist Combination Lab"
+    return Path.home() / "nai_aclab"
 
 
 USER_DIR = default_user_dir()

@@ -14,18 +14,7 @@ function userDataDir() {
     return process.env.NAI_ARTIST_LAB_USER_DIR;
   }
 
-  if (process.platform === "win32") {
-    return path.join(os.homedir(), "Pictures", "NAI Artist Combination Lab");
-  }
-
-  if (process.platform === "darwin") {
-    return path.join(os.homedir(), "Pictures", "NAI Artist Combination Lab");
-  }
-
-  return path.join(
-    process.env.XDG_PICTURES_DIR || path.join(os.homedir(), "Pictures"),
-    "NAI Artist Combination Lab"
-  );
+  return path.join(os.homedir(), "nai_aclab");
 }
 
 function printHelp() {
