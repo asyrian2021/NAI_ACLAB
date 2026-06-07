@@ -151,6 +151,8 @@ function scheduleSave() {
 
 async function saveNow() {
   if (!state) return;
+  const tokenInput = $("#api_token");
+  const hadPendingToken = Boolean(tokenInput?.value.trim());
   syncEditorsToState();
   try {
     const data = await request("/api/state", {
@@ -158,7 +160,11 @@ async function saveNow() {
       body: JSON.stringify({ state }),
     });
     state = data.state;
-    setSaveState("자동 저장됨");
+    if (hadPendingToken && tokenInput) {
+      tokenInput.value = "";
+      tokenInput.placeholder = "저장된 토큰을 사용합니다. 새 토큰을 입력하면 교체됩니다.";
+    }
+    setSaveState(hadPendingToken ? "API 토큰 변경 저장됨" : "자동 저장됨");
   } catch (error) {
     setSaveState("저장 실패");
     console.error(error);
@@ -601,8 +607,16 @@ function renderSettings() {
       input.value = key === "token" ? "" : state.api[key] ?? "";
     }
     if (key === "token") {
-      input.placeholder = state.api.token_saved ? "저장된 토큰을 사용합니다" : "API 토큰을 입력하세요";
+      input.placeholder = state.api.token_saved
+        ? "저장된 토큰을 사용합니다. 새 토큰을 입력하면 교체됩니다."
+        : "API 토큰을 입력하세요";
       input.autocomplete = "off";
+      const help = document.createElement("small");
+      help.className = "field-help";
+      help.textContent = state.api.token_saved
+        ? "보안을 위해 저장된 토큰은 다시 표시하지 않습니다. 새 토큰을 입력하고 설정 저장을 누르면 기존 토큰을 교체합니다."
+        : "토큰은 브라우저에 다시 노출하지 않고 로컬에만 저장합니다.";
+      wrap.appendChild(help);
     }
     if (type === "number") input.step = "any";
   }
@@ -1620,7 +1634,9 @@ function bindAutosaveInputs(root = document) {
     if (node.id === "compareHistorySelect") return;
     if (node.id === "deleteFilesToggle" || node.closest("#historyList")) return;
     if (node.id === "api_token") {
-      node.oninput = null;
+      node.oninput = () => {
+        setSaveState(node.value.trim() ? "새 API 토큰 입력됨" : "저장된 API 토큰 유지");
+      };
       node.onchange = () => {
         syncEditorsToState();
         scheduleSave();

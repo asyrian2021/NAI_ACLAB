@@ -319,6 +319,12 @@ label span,
   font-size: 12px;
 }
 
+.field-help {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 input,
 select,
 textarea {
