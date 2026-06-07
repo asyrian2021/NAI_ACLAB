@@ -381,7 +381,6 @@ def run_batting_test(job_id: str, state: AppState) -> None:
     run_id = now_id()
     out_dir = OUTPUT_DIR / f"{run_id}_타율테스트_{len(scenes)}씬"
     out_dir.mkdir(parents=True, exist_ok=True)
-    client = NovelAIClient(state.api)
     items = []
     progress = 0
     JOBS[job_id].update(
@@ -402,6 +401,7 @@ def run_batting_test(job_id: str, state: AppState) -> None:
             JOBS[job_id]["log"].append("중지 요청으로 남은 씬을 건너뜁니다.")
             break
         current = scene_state(state, scene)
+        client = NovelAIClient(current.api)
         base = selected_base(current)
         character = selected_character(current)
         count = scene_count(scene)
@@ -426,6 +426,9 @@ def run_batting_test(job_id: str, state: AppState) -> None:
                 "scene_index": scene_index,
                 "source_base_preset": base.name if base else "",
                 "source_character_preset": character.name if character else "",
+                "image_size": current.generation.image_size,
+                "width": current.api.width,
+                "height": current.api.height,
                 "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
             try:
