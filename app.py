@@ -337,8 +337,8 @@ class AppState:
 def default_state() -> AppState:
     return AppState(
         categories=[
-            Category("메인 그림체 작가", ["artist:example_main", "artist:sample_a"], 1.0, 1.4, 0.05, 0),
-            Category("그림체 안정화 작가", ["artist:example_stable", "artist:sample_b"], 0.4, 0.9, 0.1, 0),
+            Category("메인 그림체 작가", [], 1.0, 1.4, 0.05, 0),
+            Category("그림체 안정화 작가", [], 0.4, 0.9, 0.1, 0),
         ],
         base_presets=[
             PromptPreset("기본", "", "masterpiece, best quality, very aesthetic, detailed illustration"),

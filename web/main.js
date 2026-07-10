@@ -6,6 +6,7 @@ let currentTab = "generate";
 let categoryIndex = 0;
 let baseIndex = 0;
 let charIndex = 0;
+let charSlotIndex = 0;
 let historyIndex = 0;
 let saveTimer = null;
 let worldcupRound = [];
@@ -17,7 +18,8 @@ let worldcupMatchNumber = 0;
 let worldcupRunnerUp = null;
 let selectedHistoryIds = new Set();
 let liveItems = [];
-let compareHistoryValue = "__all__";
+let compareHistoryValue = "0";
+let compareSelectionTouched = false;
 let modalItem = null;
 let modalItems = [];
 let modalIndex = -1;
@@ -31,25 +33,25 @@ let activeJobs = { generate: null, batting: null };
 const pendingJobId = "__pending__";
 
 const pageCopy = {
-  generate: ["생성", "프리셋, 작가 조합, 생성 상태를 한 화면에서 조정합니다."],
-  batting: ["타율 테스트", "고정 작가가중치로 여러 씬의 프리셋 조합을 비교 생성합니다."],
-  artists: ["작가 태그", "카테고리별 작가 풀과 랜덤 가중치 범위를 관리합니다."],
-  presets: ["프리셋", "베이스, 퀄리티, 캐릭터 프롬프트를 저장하고 조합합니다."],
-  settings: ["API 설정", "NovelAI 요청 파라미터와 Undesired Content를 관리합니다."],
-  compare: ["가중치 비교", "생성 이미지별 작가태그 가중치를 나란히 확인합니다."],
-  history: ["히스토리", "생성 결과를 훑어보고 이상형 월드컵으로 선호 조합을 고릅니다."],
+  generate: ["이미지 생성", "프리셋과 작가 조합을 골라 이미지를 만듭니다."],
+  batting: ["타율 테스트", "같은 작가 가중치로 여러 장면을 만들어 일관성을 확인합니다."],
+  artists: ["작가 태그", "랜덤으로 조합할 작가와 가중치 범위를 설정합니다."],
+  presets: ["프롬프트 프리셋", "자주 쓰는 장면과 캐릭터 프롬프트를 저장합니다."],
+  settings: ["API 설정", "NovelAI 연결과 이미지 생성 세부값을 설정합니다."],
+  compare: ["가중치 비교", "한 히스토리의 이미지와 작가 가중치를 나란히 비교합니다."],
+  history: ["생성 기록", "완성된 이미지를 다시 보고 마음에 드는 가중치를 불러옵니다."],
 };
 
 const apiFields = [
   ["token", "API 토큰", "password"],
-  ["endpoint", "Endpoint", "text"],
-  ["model", "Model", "text"],
-  ["steps", "Steps", "number"],
-  ["scale", "Scale", "number"],
-  ["guidance_rescale", "Guidance Rescale", "number"],
-  ["sampler", "Sampler", "select"],
-  ["noise_schedule", "Noise Schedule", "select"],
-  ["seed", "Seed (-1=random)", "number"],
+  ["endpoint", "API 주소", "text"],
+  ["model", "이미지 모델", "text"],
+  ["steps", "스텝", "number"],
+  ["scale", "프롬프트 영향도 (Scale)", "number"],
+  ["guidance_rescale", "가이던스 보정", "number"],
+  ["sampler", "샘플러", "select"],
+  ["noise_schedule", "노이즈 스케줄", "select"],
+  ["seed", "시드 (-1은 매번 랜덤)", "number"],
 ];
 
 const apiSelectOptions = {
@@ -69,6 +71,17 @@ const apiSelectOptions = {
     ["exponential", "Exponential"],
     ["polyexponential", "Polyexponential"],
   ],
+};
+
+const apiFieldHelp = {
+  endpoint: "기본 NovelAI 주소입니다. 별도 서버를 쓰는 경우가 아니면 바꾸지 마세요.",
+  model: "NovelAI에서 사용할 이미지 모델입니다.",
+  steps: "높을수록 처리 시간이 늘어납니다. 기본값 28을 권장합니다.",
+  scale: "프롬프트를 따르는 강도입니다. 기본값 5를 권장합니다.",
+  guidance_rescale: "과도한 대비를 보정합니다. 특별한 이유가 없다면 기본값을 유지하세요.",
+  sampler: "이미지를 계산하는 방식입니다.",
+  noise_schedule: "노이즈 감소 순서를 정합니다.",
+  seed: "-1이면 이미지마다 새로운 랜덤 시드를 사용합니다.",
 };
 
 const imageSizeOptions = {
@@ -125,8 +138,24 @@ function renderRecognizedTags() {
   }
 }
 
-function setSaveState(text) {
-  $("#saveState").textContent = text;
+function setSaveState(text, tone = "success") {
+  const root = $("#saveState");
+  root.textContent = text;
+  root.dataset.tone = tone;
+}
+
+function showToast(message, tone = "info") {
+  const region = $("#toastRegion");
+  if (!region) return;
+  const toast = document.createElement("div");
+  toast.className = `toast ${tone}`;
+  toast.textContent = message;
+  region.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add("visible"));
+  setTimeout(() => {
+    toast.classList.remove("visible");
+    setTimeout(() => toast.remove(), 180);
+  }, 3200);
 }
 
 async function request(path, options = {}) {
@@ -139,12 +168,22 @@ async function request(path, options = {}) {
     ...options,
     headers,
   });
-  if (!response.ok) throw new Error(await response.text());
+  if (!response.ok) {
+    const raw = await response.text();
+    let message = raw;
+    try {
+      const parsed = JSON.parse(raw);
+      message = parsed.error || parsed.message || parsed.detail || raw;
+    } catch {
+      // Keep the plain response when it is not JSON.
+    }
+    throw new Error(message || `요청 실패 (${response.status})`);
+  }
   return response.json();
 }
 
 function scheduleSave() {
-  setSaveState("저장 대기 중...");
+  setSaveState("저장 중...", "working");
   clearTimeout(saveTimer);
   saveTimer = setTimeout(saveNow, 450);
 }
@@ -163,10 +202,14 @@ async function saveNow() {
     if (hadPendingToken && tokenInput) {
       tokenInput.value = "";
       tokenInput.placeholder = "저장된 토큰을 사용합니다. 새 토큰을 입력하면 교체됩니다.";
+      renderSettings();
+      renderGenerate();
     }
-    setSaveState(hadPendingToken ? "API 토큰 변경 저장됨" : "자동 저장됨");
+    setSaveState(hadPendingToken ? "API 토큰 변경 저장됨" : "자동 저장됨", "success");
+    if (hadPendingToken) showToast("새 API 토큰으로 교체했습니다.", "success");
   } catch (error) {
-    setSaveState("저장 실패");
+    setSaveState("저장 실패", "error");
+    showToast(`저장하지 못했습니다: ${error.message}`, "error");
     console.error(error);
   }
 }
@@ -373,6 +416,7 @@ function selectPreset(kind, index) {
     rememberPreset("base", state.base_presets[index]?.name);
   } else {
     charIndex = index;
+    charSlotIndex = 0;
     rememberPreset("character", state.character_presets[index]?.name);
   }
   renderPresets();
@@ -391,6 +435,99 @@ function renderPresetButtons(root, items, selectedIndex, indexes, kind) {
     button.textContent = preset.name;
     button.onclick = () => selectPreset(kind, index);
     root.appendChild(button);
+  }
+}
+
+function hasConfiguredArtists() {
+  return (state?.categories || []).some((category) => parseArtistTags(category.tags || []).length > 0);
+}
+
+function hasBasePreset() {
+  return (state?.base_presets || []).some((preset) => String(preset.name || "").trim());
+}
+
+function hasCharacterPreset() {
+  return (state?.character_presets || []).some((preset) => String(preset.name || "").trim());
+}
+
+function hasApiAccess() {
+  return Boolean(state?.api?.mock_mode || state?.api?.token_saved || String($("#api_token")?.value || "").trim());
+}
+
+function generationCanStart() {
+  return hasApiAccess() && hasConfiguredArtists() && hasBasePreset() && hasCharacterPreset();
+}
+
+function renderSetupGuide() {
+  const root = $("#setupGuide");
+  if (!root) return;
+  const steps = [
+    {
+      done: hasApiAccess(),
+      title: "NovelAI 연결",
+      detail: state.api.mock_mode ? "API 없이 체험 모드 사용 중" : state.api.token_saved ? "API 토큰 저장됨" : "API 토큰이 필요합니다",
+      tab: "settings",
+      action: "API 설정",
+    },
+    {
+      done: hasConfiguredArtists(),
+      title: "작가 태그",
+      detail: hasConfiguredArtists() ? "랜덤 조합에 사용할 태그 준비됨" : "작가 태그를 한 개 이상 입력하세요",
+      tab: "artists",
+      action: "태그 설정",
+    },
+    {
+      done: hasBasePreset() && hasCharacterPreset(),
+      title: "프롬프트 프리셋",
+      detail: hasBasePreset() && hasCharacterPreset() ? "베이스와 캐릭터 프리셋 준비됨" : "베이스와 캐릭터 프리셋이 필요합니다",
+      tab: "presets",
+      action: "프리셋 설정",
+    },
+  ];
+  const ready = steps.every((step) => step.done);
+  root.classList.toggle("ready", ready);
+  root.innerHTML = `
+    <div class="setup-guide-copy">
+      <strong>${ready ? "이미지를 만들 준비가 됐습니다" : "처음이라면 이 세 가지만 준비하세요"}</strong>
+      <span>${ready ? "아래 생성 옵션을 확인하고 이미지 생성을 시작하세요." : "완료되지 않은 항목을 누르면 바로 설정 화면으로 이동합니다."}</span>
+    </div>
+    <div class="setup-steps"></div>
+  `;
+  const list = root.querySelector(".setup-steps");
+  steps.forEach((step, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `setup-step ${step.done ? "done" : ""}`;
+    button.innerHTML = `
+      <span class="setup-step-number">${step.done ? "✓" : index + 1}</span>
+      <span><strong>${step.title}</strong><small>${step.detail}</small></span>
+      <em>${step.done ? "완료" : step.action}</em>
+    `;
+    button.onclick = () => switchTab(step.tab);
+    list.appendChild(button);
+  });
+}
+
+function battingCanStart() {
+  return currentFixedArtists().length > 0 && Boolean(state?.batting_scenes?.length);
+}
+
+function renderBattingReadiness() {
+  const root = $("#battingReadiness");
+  const loadButton = $("#battingLoadWeightsButton");
+  if (!root || !loadButton) return;
+  const hasWeights = currentFixedArtists().length > 0;
+  const hasScenes = Boolean(state.batting_scenes?.length);
+  loadButton.hidden = hasWeights;
+  root.className = `inline-notice ${hasWeights && hasScenes ? "success" : "warning"}`;
+  if (!hasWeights) {
+    root.textContent = state.history.length
+      ? "먼저 생성 기록에서 마음에 드는 이미지의 ‘가중치 불러오기’를 눌러주세요."
+      : "먼저 일반 이미지 생성을 완료한 뒤, 생성 기록에서 작가 가중치를 불러와 주세요.";
+  } else if (!hasScenes) {
+    root.textContent = "가중치는 준비됐습니다. 테스트할 씬을 한 개 이상 추가하세요.";
+  } else {
+    root.textContent = `준비 완료: 고정 가중치 ${currentFixedArtists().length}개를 ${state.batting_scenes.length}개 씬에 적용합니다.`;
   }
 }
 
@@ -414,8 +551,8 @@ function renderFixedArtistMode() {
     ? `${artists.length}개의 작가태그 가중치를 고정해서 생성합니다.`
     : "작가 태그는 생성할 때마다 랜덤으로 선택됩니다.";
   list.innerHTML = "";
+  list.hidden = !isFixed;
   if (!isFixed) {
-    list.innerHTML = `<p>고정된 작가태그가 없습니다.</p>`;
     return;
   }
   for (const row of artistWeightRows(artists)) list.appendChild(row);
@@ -434,8 +571,8 @@ function renderBattingFixedArtists() {
     ? `${artists.length}개의 작가태그 가중치를 모든 씬에 고정해서 테스트합니다.`
     : "히스토리나 가중치 비교에서 마음에 드는 이미지의 가중치를 먼저 불러오세요.";
   list.innerHTML = "";
+  list.hidden = !isFixed;
   if (!isFixed) {
-    list.innerHTML = `<p>고정된 작가태그가 없습니다.</p>`;
     return;
   }
   for (const row of artistWeightRows(artists)) list.appendChild(row);
@@ -450,12 +587,23 @@ function selectOptionsHtml(items, selectedName) {
 function renderBatting() {
   state.batting_scenes = state.batting_scenes || [];
   renderBattingFixedArtists();
+  renderBattingReadiness();
   const root = $("#battingSceneList");
   if (!root) return;
   root.dataset.rendered = "true";
   root.innerHTML = "";
   if (!state.batting_scenes.length) {
-    root.innerHTML = `<div class="empty-box">아직 등록된 씬이 없습니다. 씬을 추가해보세요.</div>`;
+    const empty = document.createElement("div");
+    empty.className = "empty-box empty-action";
+    empty.innerHTML = `<strong>아직 테스트할 씬이 없습니다.</strong><span>씬은 베이스 + 캐릭터 + 이미지 해상도 한 묶음입니다.</span>`;
+    const button = document.createElement("button");
+    button.className = "ghost-button";
+    button.type = "button";
+    button.textContent = "첫 씬 추가";
+    button.onclick = addBattingScene;
+    empty.appendChild(button);
+    root.appendChild(empty);
+    updateJobActionButtons();
     return;
   }
   state.batting_scenes.forEach((scene, index) => {
@@ -484,6 +632,7 @@ function renderBatting() {
     });
     root.appendChild(row);
   });
+  updateJobActionButtons();
 }
 
 function renderAll() {
@@ -505,7 +654,13 @@ function renderGenerate() {
   fillImageSizeSelect();
   $("#countInput").value = state.generation.count || 1;
   state.generation.fixed_artists = state.generation.fixed_artists || [];
+  const modeBadge = $("#generationModeBadge");
+  modeBadge.classList.toggle("warning", !!state.api.mock_mode);
+  modeBadge.classList.toggle("fixed", !state.api.mock_mode && !!state.api.token_saved);
+  modeBadge.textContent = state.api.mock_mode ? "API 없이 체험 중" : state.api.token_saved ? "NovelAI 연결됨" : "API 연결 필요";
   renderFixedArtistMode();
+  renderSetupGuide();
+  updateJobActionButtons();
 }
 
 function renderArtists() {
@@ -530,7 +685,22 @@ function renderArtists() {
   $("#catGranule").value = category?.granule ?? "";
   $("#catPicks").value = category?.picks > 0 ? category.picks : "";
   $("#catTags").value = (category?.tags || []).join("\n");
+  renderCategoryWeightPreview();
+  $("#deleteCategoryButton").disabled = state.categories.length <= 1;
+  $("#deleteCategoryButton").title = state.categories.length <= 1 ? "카테고리는 최소 한 개 필요합니다." : "현재 카테고리 삭제";
   renderRecognizedTags();
+}
+
+function renderCategoryWeightPreview() {
+  const range = $("#categoryWeightPreview");
+  const category = state?.categories?.[categoryIndex];
+  if (!range || !category) return;
+  const tagCount = parseArtistTags(category.tags || []).length;
+  const useCount = category.picks > 0 ? Math.min(category.picks, tagCount) : tagCount;
+  range.className = `inline-notice compact-notice ${tagCount ? "success" : "warning"}`;
+  range.textContent = tagCount
+    ? `생성할 때 이 카테고리에서 ${useCount}개 태그를 고르고, 각 가중치를 ${category.min_weight}~${category.max_weight} 범위에서 ${category.granule} 간격으로 정합니다.`
+    : "인식된 artist 태그가 없습니다. 위 입력 예시처럼 태그를 추가하세요.";
 }
 
 function renderPresets() {
@@ -560,13 +730,23 @@ function renderPresets() {
   );
   const character = state.character_presets[charIndex];
   $("#charName").value = character?.name || "";
+  const tabs = $("#charSlotTabs");
+  tabs.innerHTML = "";
   const editors = $("#characterEditors");
   editors.innerHTML = "";
   for (let i = 0; i < 3; i += 1) {
+    const tab = document.createElement("button");
+    const hasContent = Boolean(character?.prompts?.[i]?.trim() || character?.negatives?.[i]?.trim());
+    tab.type = "button";
+    tab.className = `segment-button ${i === charSlotIndex ? "active" : ""}`;
+    tab.textContent = `캐릭터 ${i + 1}${hasContent ? " · 입력됨" : ""}`;
+    tab.onclick = () => selectCharacterSlot(i);
+    tabs.appendChild(tab);
     const box = document.createElement("div");
     box.className = "character-box";
+    box.hidden = i !== charSlotIndex;
     box.innerHTML = `
-      <h3>캐릭터 ${i + 1}</h3>
+      <p class="character-slot-help">한 명의 캐릭터 프롬프트를 입력하세요. 비워둔 캐릭터는 최종 프롬프트에서 제외됩니다.</p>
       <label class="text-label"><span>프롬프트</span><textarea id="charPrompt${i}" spellcheck="false"></textarea></label>
       <label class="text-label"><span>네거티브 프롬프트</span><textarea id="charNegative${i}" spellcheck="false"></textarea></label>
     `;
@@ -574,12 +754,23 @@ function renderPresets() {
     $(`#charPrompt${i}`).value = character?.prompts?.[i] || "";
     $(`#charNegative${i}`).value = character?.negatives?.[i] || "";
   }
+  $("#deleteBaseButton").disabled = state.base_presets.length <= 1;
+  $("#deleteCharButton").disabled = state.character_presets.length <= 1;
   bindAutosaveInputs(editors);
 }
 
+function selectCharacterSlot(index) {
+  if (index < 0 || index > 2 || index === charSlotIndex) return;
+  syncEditorsToState();
+  charSlotIndex = index;
+  renderPresets();
+}
+
 function renderSettings() {
-  const form = $("#apiForm");
-  form.innerHTML = "";
+  const primaryForm = $("#apiPrimaryForm");
+  const advancedForm = $("#apiAdvancedForm");
+  primaryForm.innerHTML = "";
+  advancedForm.innerHTML = "";
   for (const [key, label, type] of apiFields) {
     const wrap = document.createElement("label");
     if (type === "select") {
@@ -587,6 +778,7 @@ function renderSettings() {
     } else {
       wrap.innerHTML = `<span>${label}</span><input id="api_${key}" type="${type}" />`;
     }
+    const form = key === "token" ? primaryForm : advancedForm;
     form.appendChild(wrap);
     const input = $(`#api_${key}`);
     if (type === "select") {
@@ -617,13 +809,27 @@ function renderSettings() {
         ? "보안을 위해 저장된 토큰은 다시 표시하지 않습니다. 새 토큰을 입력하고 설정 저장을 누르면 기존 토큰을 교체합니다."
         : "토큰은 브라우저에 다시 노출하지 않고 로컬에만 저장합니다.";
       wrap.appendChild(help);
+    } else if (apiFieldHelp[key]) {
+      const help = document.createElement("small");
+      help.className = "field-help";
+      help.textContent = apiFieldHelp[key];
+      wrap.appendChild(help);
     }
     if (type === "number") input.step = "any";
   }
   $("#mockMode").checked = !!state.api.mock_mode;
+  const connection = $("#apiConnectionStatus");
+  connection.classList.toggle("warning", !!state.api.mock_mode || !state.api.token_saved);
+  connection.classList.toggle("fixed", !state.api.mock_mode && !!state.api.token_saved);
+  connection.textContent = state.api.mock_mode
+    ? "체험 모드"
+    : state.api.token_saved
+      ? "토큰 저장됨"
+      : "토큰 필요";
   $("#negativePrompt").value = state.negative_prompt || "";
   $("#ucPrompt").value = state.uc_prompt || "";
-  bindAutosaveInputs(form);
+  bindAutosaveInputs(primaryForm);
+  bindAutosaveInputs(advancedForm);
 }
 
 function canReuseArtists(item) {
@@ -695,6 +901,9 @@ function renderLiveGallery(items = liveItems, rootSelector = "#liveGallery") {
 function renderHistory() {
   const list = $("#historyList");
   list.innerHTML = "";
+  if (!state.history.length) {
+    list.innerHTML = `<div class="empty-box"><strong>아직 생성 기록이 없습니다.</strong><span>이미지를 생성하면 프리셋 조합별로 자동 저장됩니다.</span></div>`;
+  }
   state.history.forEach((history, index) => {
     const row = document.createElement("div");
     row.className = "history-list-row";
@@ -706,6 +915,7 @@ function renderHistory() {
     checkbox.onchange = () => {
       if (checkbox.checked) selectedHistoryIds.add(history.id);
       else selectedHistoryIds.delete(history.id);
+      updateHistoryActions();
     };
     const button = document.createElement("button");
     button.className = `list-item ${index === historyIndex ? "active" : ""}`;
@@ -727,7 +937,9 @@ function renderHistory() {
   const detail = $("#historyDetail");
   detail.innerHTML = "";
   if (!history) {
-    detail.innerHTML = `<p>아직 생성 히스토리가 없습니다.</p>`;
+    detail.innerHTML = `<div class="empty-box empty-action"><strong>비교할 이미지가 없습니다.</strong><span>생성 메뉴에서 첫 이미지를 만들어 보세요.</span><button class="primary-button" type="button" id="historyGoGenerateButton">이미지 생성으로 이동</button></div>`;
+    $("#historyGoGenerateButton").onclick = () => switchTab("generate");
+    updateHistoryActions();
     return;
   }
   const actions = document.createElement("div");
@@ -751,6 +963,26 @@ function renderHistory() {
   (history.items || []).forEach((item, index) => {
     detail.appendChild(renderImageCard(item, { history, label: `#${index + 1}`, modalItems }));
   });
+  updateHistoryActions();
+}
+
+function updateHistoryActions() {
+  const hasHistory = Boolean(state?.history?.length);
+  const allSelected = hasHistory && state.history.every((item) => selectedHistoryIds.has(item.id));
+  const selectAll = $("#selectAllHistoryButton");
+  const deleteSelected = $("#deleteSelectedHistoryButton");
+  const clear = $("#clearHistoryButton");
+  if (selectAll) {
+    selectAll.disabled = !hasHistory;
+    selectAll.textContent = allSelected ? "선택 해제" : "전체 선택";
+  }
+  if (deleteSelected) {
+    deleteSelected.disabled = selectedHistoryIds.size === 0;
+    deleteSelected.textContent = selectedHistoryIds.size ? `선택 ${selectedHistoryIds.size}개 삭제` : "선택 삭제";
+  }
+  if (clear) clear.disabled = !hasHistory;
+  const worldcup = $("#startWorldcupButton");
+  if (worldcup) worldcup.disabled = !(state?.history?.[historyIndex]?.items || []).some((item) => item.image_url);
 }
 
 function syncSelectedHistoryIdsFromDom() {
@@ -783,6 +1015,7 @@ function renderCompare() {
   if (!select) return;
   select.onchange = (event) => {
     compareHistoryValue = event.target.value;
+    compareSelectionTouched = true;
     renderCompare();
   };
   const previous = compareHistoryValue;
@@ -797,7 +1030,13 @@ function renderCompare() {
     option.textContent = `${history.created_at} · ${history.base_preset} + ${history.character_preset} · ${(history.items || []).length}장`;
     select.appendChild(option);
   });
-  compareHistoryValue = previous === "__all__" || state.history[Number(previous)] ? previous : "__all__";
+  compareHistoryValue = !state.history.length
+    ? "__all__"
+    : !compareSelectionTouched
+      ? "0"
+      : previous === "__all__" || state.history[Number(previous)]
+        ? previous
+        : "0";
   select.value = compareHistoryValue;
 
   const items = compareItems();
@@ -1127,9 +1366,12 @@ function addBattingScene() {
 
 function deleteBattingScene(index) {
   syncBattingScenesToState();
+  const scene = state.batting_scenes[index];
+  if (!scene || !window.confirm(`'${scene.name || `Scene ${index + 1}`}' 씬을 삭제할까요?`)) return;
   state.batting_scenes.splice(index, 1);
   renderBatting();
   scheduleSave();
+  showToast("씬을 삭제했습니다.", "success");
 }
 
 function battingStateForRequest() {
@@ -1149,12 +1391,13 @@ async function startBattingTest() {
   if (hasActiveJob()) return;
   if (!confirmCustomEndpointTokenUse()) return;
   if (!currentFixedArtists().length) {
-    window.alert("타율 테스트는 작가태그 가중치를 고정한 상태에서 실행하는 기능입니다. 먼저 히스토리나 가중치 비교에서 가중치를 불러와 주세요.");
+    showToast("먼저 생성 기록에서 마음에 드는 이미지의 가중치를 불러와 주세요.", "warning");
+    switchTab(state.history.length ? "history" : "generate");
     return;
   }
   syncBattingScenesToState();
   if (!state.batting_scenes?.length) {
-    window.alert("테스트할 씬을 먼저 추가해 주세요.");
+    showToast("테스트할 씬을 먼저 추가해 주세요.", "warning");
     return;
   }
   $("#battingJobLog").textContent = "타율 테스트를 시작합니다...\n";
@@ -1175,6 +1418,7 @@ async function startBattingTest() {
     setBattingRunning(false);
     $("#battingProgressText").textContent = "실패";
     $("#battingJobLog").textContent += `시작 실패: ${error.message}\n`;
+    showToast(`타율 테스트를 시작하지 못했습니다: ${error.message}`, "error");
   }
 }
 
@@ -1213,9 +1457,16 @@ function updateJobActionButtons(cancellingKind = "") {
   const addBattingButton = $("#addBattingSceneButton");
   const stopBattingButton = $("#stopBattingButton");
   if (topButton) topButton.disabled = busy;
-  if (inlineButton) inlineButton.disabled = busy;
+  if (inlineButton) {
+    inlineButton.disabled = busy || !generationCanStart();
+    inlineButton.title = generationCanStart() ? "선택한 설정으로 이미지 생성" : "위 준비 상태에서 완료되지 않은 항목을 먼저 설정하세요.";
+    if (!busy) inlineButton.textContent = `이미지 ${Math.max(1, Number($("#countInput")?.value || state?.generation?.count || 1))}장 생성`;
+  }
   if (previewButton) previewButton.disabled = busy;
-  if (startBattingButton) startBattingButton.disabled = busy;
+  if (startBattingButton) {
+    startBattingButton.disabled = busy || !battingCanStart();
+    startBattingButton.title = battingCanStart() ? "모든 씬을 순서대로 생성" : "고정 가중치와 씬을 먼저 준비하세요.";
+  }
   if (addBattingButton) addBattingButton.disabled = busy;
   if (stopGenerateButton) {
     stopGenerateButton.disabled = !generateRunning || isPendingJob(activeJobs.generate) || cancellingKind === "generate";
@@ -1336,6 +1587,11 @@ function confirmCustomEndpointTokenUse() {
 async function startGeneration() {
   syncEditorsToState();
   if (hasActiveJob()) return;
+  if (!generationCanStart()) {
+    showToast("생성 준비가 끝나지 않았습니다. 준비 상태에서 필요한 항목을 확인해 주세요.", "warning");
+    renderSetupGuide();
+    return;
+  }
   if (!confirmCustomEndpointTokenUse()) return;
   setProgressActive(true);
   setGenerationRunning(true);
@@ -1354,6 +1610,7 @@ async function startGeneration() {
     setGenerationRunning(false);
     $("#progressText").textContent = "실패";
     $("#jobLog").textContent += `시작 실패: ${error.message}\n`;
+    showToast(`이미지 생성을 시작하지 못했습니다: ${error.message}`, "error");
   }
 }
 
@@ -1424,6 +1681,7 @@ async function pollJob(jobId, targets = jobTargets("generate")) {
     }
     await loadState();
     switchTab(targets.finalTab);
+    showToast(job.status === "cancelled" ? "이미지 생성을 중지했습니다." : "이미지 생성이 완료됐습니다.", job.status === "cancelled" ? "warning" : "success");
   }
 }
 
@@ -1581,14 +1839,22 @@ function addCategory() {
   categoryIndex = state.categories.length - 1;
   renderArtists();
   scheduleSave();
+  showToast("새 작가 카테고리를 추가했습니다.", "success");
 }
 
 function deleteCategory() {
-  if (!state.categories[categoryIndex]) return;
+  const category = state.categories[categoryIndex];
+  if (!category) return;
+  if (state.categories.length <= 1) {
+    showToast("작가 카테고리는 최소 한 개 필요합니다.", "warning");
+    return;
+  }
+  if (!window.confirm(`'${category.name}' 카테고리를 삭제할까요?`)) return;
   state.categories.splice(categoryIndex, 1);
   categoryIndex = Math.max(0, categoryIndex - 1);
   renderArtists();
   scheduleSave();
+  showToast("작가 카테고리를 삭제했습니다.", "success");
 }
 
 function addBase() {
@@ -1599,34 +1865,52 @@ function addBase() {
   renderPresets();
   renderGenerate();
   scheduleSave();
+  showToast("새 베이스 프리셋을 추가했습니다.", "success");
 }
 
 function deleteBase() {
-  if (!state.base_presets[baseIndex]) return;
+  const preset = state.base_presets[baseIndex];
+  if (!preset) return;
+  if (state.base_presets.length <= 1) {
+    showToast("베이스 프리셋은 최소 한 개 필요합니다.", "warning");
+    return;
+  }
+  if (!window.confirm(`'${preset.name}' 베이스 프리셋을 삭제할까요?`)) return;
   state.base_presets.splice(baseIndex, 1);
   baseIndex = Math.max(0, baseIndex - 1);
   renderPresets();
   renderGenerate();
   scheduleSave();
+  showToast("베이스 프리셋을 삭제했습니다.", "success");
 }
 
 function addChar() {
   syncEditorsToState();
   state.character_presets.push({ name: uniqueName(state.character_presets, "새 캐릭터"), prompts: ["", "", ""], negatives: ["", "", ""] });
   charIndex = state.character_presets.length - 1;
+  charSlotIndex = 0;
   rememberPreset("character", state.character_presets[charIndex].name);
   renderPresets();
   renderGenerate();
   scheduleSave();
+  showToast("새 캐릭터 프리셋을 추가했습니다.", "success");
 }
 
 function deleteChar() {
-  if (!state.character_presets[charIndex]) return;
+  const preset = state.character_presets[charIndex];
+  if (!preset) return;
+  if (state.character_presets.length <= 1) {
+    showToast("캐릭터 프리셋은 최소 한 개 필요합니다.", "warning");
+    return;
+  }
+  if (!window.confirm(`'${preset.name}' 캐릭터 프리셋을 삭제할까요?`)) return;
   state.character_presets.splice(charIndex, 1);
   charIndex = Math.max(0, charIndex - 1);
+  charSlotIndex = 0;
   renderPresets();
   renderGenerate();
   scheduleSave();
+  showToast("캐릭터 프리셋을 삭제했습니다.", "success");
 }
 
 function bindAutosaveInputs(root = document) {
@@ -1635,7 +1919,9 @@ function bindAutosaveInputs(root = document) {
     if (node.id === "deleteFilesToggle" || node.closest("#historyList")) return;
     if (node.id === "api_token") {
       node.oninput = () => {
-        setSaveState(node.value.trim() ? "새 API 토큰 입력됨" : "저장된 API 토큰 유지");
+        setSaveState(node.value.trim() ? "새 API 토큰 입력됨" : "저장된 API 토큰 유지", node.value.trim() ? "working" : "success");
+        renderSetupGuide();
+        updateJobActionButtons();
       };
       node.onchange = () => {
         syncEditorsToState();
@@ -1646,6 +1932,12 @@ function bindAutosaveInputs(root = document) {
     node.oninput = () => {
       syncEditorsToState();
       if (node.id === "catTags") renderRecognizedTags();
+      if (["catTags", "catMin", "catMax", "catGranule", "catPicks"].includes(node.id)) renderCategoryWeightPreview();
+      if (node.id === "countInput") updateJobActionButtons();
+      if (["catTags", "baseName", "charName"].includes(node.id)) {
+        renderSetupGuide();
+        updateJobActionButtons();
+      }
       scheduleSave();
     };
     node.onchange = () => {
@@ -1653,6 +1945,12 @@ function bindAutosaveInputs(root = document) {
       if (node.id === "baseSelect") rememberPreset("base", state.generation.base_preset);
       if (node.id === "charSelect") rememberPreset("character", state.generation.character_preset);
       scheduleSave();
+      if (node.id === "mockMode") {
+        renderSettings();
+        renderGenerate();
+        renderBatting();
+        showToast(state.api.mock_mode ? "API 없이 체험 모드를 켰습니다." : "실제 NovelAI 생성 모드로 전환했습니다.", "info");
+      }
       if (node.id === "baseSelect" || node.id === "charSelect" || node.id === "countInput" || node.id === "imageSizeSelect") previewPrompt();
     };
   });
@@ -1697,7 +1995,10 @@ async function loadState() {
 function bindEvents() {
   bindModalImageInteractions();
   $$(".nav-item").forEach((button) => button.onclick = () => switchTab(button.dataset.tab));
-  $("#refreshButton").onclick = loadState;
+  $("#refreshButton").onclick = async () => {
+    await loadState();
+    showToast("저장된 내용을 다시 불러왔습니다.", "success");
+  };
   $("#previewButton").onclick = previewPrompt;
   $("#generateButtonInline").onclick = startGeneration;
   $("#stopGenerateButton").onclick = stopGeneration;
@@ -1705,6 +2006,10 @@ function bindEvents() {
   $("#addBattingSceneButton").onclick = addBattingScene;
   $("#startBattingButton").onclick = startBattingTest;
   $("#stopBattingButton").onclick = stopBattingTest;
+  $("#battingLoadWeightsButton").onclick = () => {
+    switchTab(state.history.length ? "history" : "generate");
+    showToast(state.history.length ? "이미지 아래의 ‘가중치 불러오기’를 눌러주세요." : "먼저 이미지를 생성해 주세요.", "info");
+  };
   $("#basePresetAllButton").onclick = () => openPresetPicker("base");
   $("#charPresetAllButton").onclick = () => openPresetPicker("character");
   $("#addCategoryButton").onclick = addCategory;
@@ -1737,6 +2042,7 @@ function bindEvents() {
   });
   $("#compareHistorySelect").onchange = (event) => {
     compareHistoryValue = event.target.value;
+    compareSelectionTouched = true;
     renderCompare();
   };
 }

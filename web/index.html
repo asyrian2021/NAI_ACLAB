@@ -13,16 +13,16 @@
           <div class="brand-mark">NAI</div>
           <div>
             <strong>Artist Lab</strong>
-            <span>Prompt mixing workspace</span>
+            <span>NovelAI 작가 조합 실험실</span>
           </div>
         </div>
         <nav class="nav" aria-label="Main">
-          <button class="nav-item active" data-tab="generate">⌘ 생성</button>
+          <button class="nav-item active" data-tab="generate">⌘ 이미지 생성</button>
           <button class="nav-item" data-tab="batting">▦ 타율 테스트</button>
           <button class="nav-item" data-tab="artists"># 작가 태그</button>
-          <button class="nav-item" data-tab="presets">▣ 프리셋</button>
+          <button class="nav-item" data-tab="presets">▣ 프롬프트 프리셋</button>
           <button class="nav-item" data-tab="compare">≋ 가중치 비교</button>
-          <button class="nav-item" data-tab="history">◈ 히스토리</button>
+          <button class="nav-item" data-tab="history">◈ 생성 기록</button>
         </nav>
         <div class="sidebar-tools">
           <button class="nav-item settings-nav-item" data-tab="settings">⚙ API 설정</button>
@@ -39,7 +39,7 @@
             <p id="pageSubtitle">프리셋, 작가 조합, 생성 상태를 한 화면에서 조정합니다.</p>
           </div>
           <div class="top-actions">
-            <button class="ghost-button" id="refreshButton">새로고침</button>
+            <button class="icon-button" id="refreshButton" type="button" title="저장된 내용을 다시 불러오기" aria-label="저장된 내용을 다시 불러오기">↻</button>
           </div>
         </header>
 
@@ -56,13 +56,16 @@
             </div>
           </section>
 
+          <section id="setupGuide" class="setup-guide" aria-label="생성 준비 상태"></section>
+
           <div class="grid two-one">
             <section class="panel">
               <div class="panel-header">
                 <div>
                   <h2>생성 옵션</h2>
-                  <p>마지막 선택값은 자동 저장됩니다.</p>
+                  <p>프리셋과 이미지 수를 고른 뒤 바로 생성할 수 있습니다.</p>
                 </div>
+                <span class="mode-status" id="generationModeBadge"></span>
               </div>
               <div class="form-grid">
                 <label>
@@ -91,7 +94,7 @@
                 <div id="fixedArtistList" class="artist-weight-list fixed-artist-list"></div>
               </div>
               <div class="button-row">
-                <button class="ghost-button" id="previewButton">프롬프트 새로 뽑기</button>
+                <button class="ghost-button" id="previewButton" type="button" title="이미지는 만들지 않고 랜덤 작가 조합과 최종 프롬프트만 다시 계산합니다.">작가 조합 다시 뽑기</button>
                 <button class="primary-button" id="generateButtonInline">이미지 생성</button>
                 <button class="danger-button" id="stopGenerateButton" type="button" disabled>생성 중지</button>
               </div>
@@ -156,10 +159,12 @@
             <div class="fixed-artist-panel">
               <div class="fixed-artist-head">
                 <div class="mode-status" id="battingFixedArtistModeLabel">랜덤 가중치 모드</div>
+                <button class="ghost-button" id="battingLoadWeightsButton" type="button">히스토리에서 가중치 고르기</button>
               </div>
               <p id="battingFixedArtistSummary">히스토리나 가중치 비교에서 마음에 드는 이미지의 가중치를 먼저 불러오세요.</p>
               <div id="battingFixedArtistList" class="artist-weight-list fixed-artist-list"></div>
             </div>
+            <div id="battingReadiness" class="inline-notice"></div>
             <div id="battingSceneList" class="batting-scene-list"></div>
           </section>
 
@@ -223,12 +228,21 @@
                 <label><span>카테고리명</span><input id="catName" /></label>
                 <label><span>최소 가중치</span><input id="catMin" type="number" step="0.01" /></label>
                 <label><span>최대 가중치</span><input id="catMax" type="number" step="0.01" /></label>
-                <label><span>Granule</span><input id="catGranule" type="number" step="0.01" /></label>
-                <label><span>선택 태그 수</span><input id="catPicks" type="number" min="1" placeholder="전체" /></label>
+                <label>
+                  <span>가중치 간격</span>
+                  <input id="catGranule" type="number" step="0.01" />
+                  <small class="field-help">예: 0.05이면 1.00, 1.05, 1.10처럼 선택됩니다.</small>
+                </label>
+                <label>
+                  <span>한 번에 사용할 태그 수</span>
+                  <input id="catPicks" type="number" min="1" placeholder="비워두면 전체" />
+                  <small class="field-help">비워두면 이 카테고리에 입력한 작가를 모두 사용합니다.</small>
+                </label>
               </div>
               <label class="text-label">
                 <span>태그 목록</span>
-                <textarea id="catTags" spellcheck="false"></textarea>
+                <textarea id="catTags" spellcheck="false" placeholder="artist:example_name&#10;또는 1.2::artist:example_name ::, artist:another_name"></textarea>
+                <small class="field-help">쉼표로 붙여넣거나 한 줄에 하나씩 입력해도 artist:이름 부분만 자동 인식합니다.</small>
               </label>
               <div class="recognized-box">
                 <div>
@@ -237,6 +251,7 @@
                 </div>
                 <div id="recognizedTags" class="tag-chips"></div>
               </div>
+              <div id="categoryWeightPreview" class="inline-notice compact-notice"></div>
               <div class="button-row">
                 <button class="danger-button" id="deleteCategoryButton">카테고리 삭제</button>
               </div>
@@ -258,7 +273,11 @@
               <label class="text-label short"><span>프리셋 이름</span><input id="baseName" /></label>
               <label class="text-label"><span>베이스 프롬프트</span><textarea id="basePrompt" spellcheck="false"></textarea></label>
               <label class="text-label"><span>퀄리티 프롬프트</span><textarea id="qualityPrompt" spellcheck="false"></textarea></label>
-              <label class="text-label"><span>공용 퀄리티 프롬프트 Override</span><textarea id="qualityOverridePrompt" spellcheck="false" placeholder="비워두면 선택한 베이스 + 퀄리티 프리셋의 퀄리티 프롬프트를 사용합니다."></textarea></label>
+              <label class="text-label">
+                <span>공용 퀄리티 덮어쓰기 (선택)</span>
+                <textarea id="qualityOverridePrompt" spellcheck="false" placeholder="비워두면 각 베이스 프리셋의 퀄리티 프롬프트를 사용합니다."></textarea>
+                <small class="field-help">값이 있으면 모든 베이스 프리셋의 퀄리티 프롬프트 대신 이 내용을 사용합니다.</small>
+              </label>
               <button class="danger-button" id="deleteBaseButton">베이스 프리셋 삭제</button>
             </section>
             <section class="panel">
@@ -274,6 +293,7 @@
               </div>
               <div id="charList" class="item-list horizontal"></div>
               <label class="text-label short"><span>프리셋 이름</span><input id="charName" /></label>
+              <div id="charSlotTabs" class="segment-control" role="tablist" aria-label="캐릭터 선택"></div>
               <div id="characterEditors" class="character-editors"></div>
               <button class="danger-button" id="deleteCharButton">캐릭터 프리셋 삭제</button>
             </section>
@@ -284,23 +304,46 @@
           <div class="grid two-one">
             <section class="panel">
               <div class="panel-header">
-                <h2>API 설정</h2>
-                <p>생성 시 자동 저장됩니다.</p>
+                <div>
+                  <h2>NovelAI 연결</h2>
+                  <p>실제 이미지를 만들려면 API 토큰이 필요합니다.</p>
+                </div>
+                <span id="apiConnectionStatus" class="mode-status"></span>
               </div>
-              <div id="apiForm" class="form-grid compact"></div>
-              <label class="switch-row">
+              <div id="apiPrimaryForm" class="form-grid"></div>
+              <label class="switch-row feature-switch">
                 <input id="mockMode" type="checkbox" />
-                <span>목업 모드 사용</span>
+                <span>
+                  <strong>API 없이 체험하기</strong>
+                  <small>NovelAI에 요청하지 않고 색상 목업 이미지를 생성합니다.</small>
+                </span>
               </label>
-              <button class="primary-button" id="saveSettingsButton">설정 저장</button>
+              <div class="button-row">
+                <button class="primary-button" id="saveSettingsButton">토큰 및 설정 저장</button>
+              </div>
+              <details class="advanced-settings">
+                <summary>고급 API 설정</summary>
+                <p>NovelAI 기본값을 바꿔야 할 때만 열어보세요.</p>
+                <div id="apiAdvancedForm" class="form-grid compact"></div>
+              </details>
             </section>
             <section class="panel">
               <div class="panel-header">
-                <h2>Undesired Content</h2>
-                <p>V4 negative와 legacy UC를 분리해서 보냅니다.</p>
+                <div>
+                  <h2>제외할 내용</h2>
+                  <p>이미지에 나오지 않았으면 하는 요소를 입력합니다.</p>
+                </div>
               </div>
-              <label class="text-label"><span>공통 네거티브 프롬프트</span><textarea id="negativePrompt" spellcheck="false"></textarea></label>
-              <label class="text-label"><span>UC 프롬프트 (parameters.uc / negative_prompt)</span><textarea id="ucPrompt" spellcheck="false"></textarea></label>
+              <label class="text-label">
+                <span>공통 네거티브 프롬프트</span>
+                <textarea id="negativePrompt" spellcheck="false"></textarea>
+                <small class="field-help">모든 캐릭터에 공통으로 적용됩니다.</small>
+              </label>
+              <label class="text-label">
+                <span>UC 프롬프트 (선택)</span>
+                <textarea id="ucPrompt" spellcheck="false" placeholder="비워두면 공통 네거티브 프롬프트를 그대로 사용합니다."></textarea>
+                <small class="field-help">NovelAI의 legacy UC에 별도 내용을 보내고 싶을 때만 입력하세요.</small>
+              </label>
             </section>
           </div>
         </section>
@@ -406,6 +449,7 @@
         <div id="presetPickerList" class="preset-picker-list"></div>
       </section>
     </div>
+    <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
     <script src="/web/main.js"></script>
   </body>
 </html>
