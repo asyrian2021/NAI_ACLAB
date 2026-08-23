@@ -257,7 +257,6 @@ function syncEditorsToState() {
   }
 
   state.negative_prompt = $("#negativePrompt").value.trim();
-  state.uc_prompt = $("#ucPrompt").value.trim();
 
   for (const [key, , type] of apiFields) {
     const input = $(`#api_${key}`);
@@ -827,7 +826,6 @@ function renderSettings() {
       ? "토큰 저장됨"
       : "토큰 필요";
   $("#negativePrompt").value = state.negative_prompt || "";
-  $("#ucPrompt").value = state.uc_prompt || "";
   bindAutosaveInputs(primaryForm);
   bindAutosaveInputs(advancedForm);
 }
@@ -1553,7 +1551,6 @@ async function previewPrompt() {
   });
   $("#promptPreview").textContent = data.prompt || "";
   $("#negativePreview").textContent = data.negative || "";
-  $("#ucPreview").textContent = data.uc || "";
   setSaveState("미리보기 갱신됨");
 }
 

@@ -131,6 +131,7 @@ def cleanup_saved_request_jsons() -> None:
 
 def state_dict_without_secrets(state: AppState | dict) -> dict:
     data = asdict(state) if not isinstance(state, dict) else dict(state)
+    data.pop("uc_prompt", None)
     api = dict(data.get("api", {}) or {})
     api["token"] = ""
     data["api"] = api
@@ -286,7 +287,7 @@ class ApiSettings:
     token: str = ""
     endpoint: str = "https://image.novelai.net/ai/generate-image"
     user_agent: str = DEFAULT_USER_AGENT
-    model: str = "nai-diffusion-4-5-curated"
+    model: str = "nai-diffusion-5-full"
     width: int = 832
     height: int = 1216
     steps: int = 28
@@ -327,7 +328,6 @@ class AppState:
     character_presets: list[CharacterPreset] = field(default_factory=list)
     quality_override_prompt: str = ""
     negative_prompt: str = "lowres, bad anatomy, bad hands, text, error, missing fingers"
-    uc_prompt: str = ""
     api: ApiSettings = field(default_factory=ApiSettings)
     generation: GenerationSettings = field(default_factory=GenerationSettings)
     batting_scenes: list[BattingScene] = field(default_factory=list)
@@ -392,7 +392,6 @@ def load_state() -> AppState:
         character_presets=[CharacterPreset(**item) for item in data.get("character_presets", [])],
         quality_override_prompt=quality_override,
         negative_prompt=data.get("negative_prompt", ""),
-        uc_prompt=data.get("uc_prompt", data.get("negative_prompt", "")),
         api=ApiSettings(**api_data),
         generation=GenerationSettings(**data.get("generation", {})),
         batting_scenes=[BattingScene(**item) for item in data.get("batting_scenes", [])],
@@ -412,7 +411,7 @@ class NovelAIClient:
     def __init__(self, settings: ApiSettings):
         self.settings = settings
 
-    def build_payload(self, prompt: str, negative_prompt: str, uc_prompt: str, seed: int | None = None) -> dict:
+    def build_payload(self, prompt: str, negative_prompt: str, seed: int | None = None) -> dict:
         actual_seed = seed if seed is not None else (
             self.settings.seed if self.settings.seed >= 0 else random.randint(0, 2**32 - 1)
         )
@@ -468,18 +467,18 @@ class NovelAIClient:
                 "wonky_vibe_correlation": True,
                 "stream": "none",
                 "version": 1,
-                "uc": uc_prompt,
-                "negative_prompt": uc_prompt,
+                "uc": negative_prompt,
+                "negative_prompt": negative_prompt,
                 "request_type": "PromptGenerateRequest",
             },
         }
 
-    def generate(self, prompt: str, negative_prompt: str, uc_prompt: str, output_path: Path) -> None:
+    def generate(self, prompt: str, negative_prompt: str, output_path: Path) -> None:
         if self.settings.mock_mode or not self.settings.token.strip():
             write_placeholder_png(output_path, prompt, self.settings.width, self.settings.height)
             return
 
-        payload = self.build_payload(prompt, negative_prompt, uc_prompt)
+        payload = self.build_payload(prompt, negative_prompt)
         req = urllib.request.Request(
             self.settings.endpoint,
             data=json.dumps(payload).encode("utf-8"),
@@ -794,11 +793,7 @@ class App(tk.Tk if tk else object):
         neg_box.pack(fill=BOTH, expand=True, pady=12)
         self.negative_text = tk.Text(neg_box, height=8, wrap="word")
         self.negative_text.pack(fill=BOTH, expand=True)
-        uc_box = ttk.LabelFrame(self.settings_tab, text="UC 프롬프트 (parameters.uc)", padding=8)
-        uc_box.pack(fill=BOTH, expand=True, pady=(0, 12))
-        self.uc_text = tk.Text(uc_box, height=5, wrap="word")
-        self.uc_text.pack(fill=BOTH, expand=True)
-        ttk.Button(uc_box, text="네거티브 / UC 저장", command=self.save_negative).pack(anchor="e", pady=6)
+        ttk.Button(neg_box, text="네거티브 프롬프트 저장", command=self.save_negative).pack(anchor="e", pady=6)
 
     def refresh_all(self) -> None:
         self.refresh_categories()
@@ -1171,8 +1166,6 @@ class App(tk.Tk if tk else object):
             var.set(getattr(api, key))
         self.negative_text.delete("1.0", END)
         self.negative_text.insert("1.0", self.state_data.negative_prompt)
-        self.uc_text.delete("1.0", END)
-        self.uc_text.insert("1.0", self.state_data.uc_prompt)
 
     def save_api_settings(self, show_message: bool = True) -> None:
         api = self.state_data.api
@@ -1184,7 +1177,6 @@ class App(tk.Tk if tk else object):
 
     def save_negative(self) -> None:
         self.state_data.negative_prompt = self.negative_text.get("1.0", END).strip()
-        self.state_data.uc_prompt = self.uc_text.get("1.0", END).strip()
         save_state(self.state_data)
 
     def random_artist_tags(self) -> list[dict]:
@@ -1200,7 +1192,7 @@ class App(tk.Tk if tk else object):
                 result.append({"category": cat.name, "tag": tag, "weight": weight, "prompt": weight_tag(tag, weight)})
         return result
 
-    def build_prompt(self) -> tuple[str, str, str, list[dict]]:
+    def build_prompt(self) -> tuple[str, str, list[dict]]:
         base = self.find_base()
         char = self.find_char()
         artists = self.random_artist_tags()
@@ -1226,11 +1218,10 @@ class App(tk.Tk if tk else object):
         if char:
             negative.extend(n.strip() for n in char.negatives if n.strip())
         negative_prompt = ", ".join(n for n in negative if n)
-        uc_prompt = self.state_data.uc_prompt.strip() or negative_prompt
-        return " | ".join(prompt_parts), negative_prompt, uc_prompt, artists
+        return " | ".join(prompt_parts), negative_prompt, artists
 
     def preview_prompt(self) -> None:
-        prompt, negative, uc_prompt, artists = self.build_prompt()
+        prompt, negative, artists = self.build_prompt()
         base = self.find_base()
         char = self.find_char()
         self.prompt_preview.delete("1.0", END)
@@ -1249,7 +1240,7 @@ class App(tk.Tk if tk else object):
             for idx, char_prompt in enumerate(char.prompts, start=1):
                 if char_prompt.strip():
                     self.prompt_preview.insert(END, f"{idx}. {char_prompt.strip()}\n")
-        self.prompt_preview.insert(END, f"\n[Negative]\n{negative}\n\n[UC]\n{uc_prompt}\n")
+        self.prompt_preview.insert(END, f"\n[Negative / UC]\n{negative}\n")
 
     def start_generation(self) -> None:
         count = max(1, int(self.count_var.get()))
@@ -1274,7 +1265,7 @@ class App(tk.Tk if tk else object):
         client = NovelAIClient(self.state_data.api)
         items = []
         for idx in range(count):
-            prompt, negative, uc_prompt, artists = self.build_prompt()
+            prompt, negative, artists = self.build_prompt()
             path = out_dir / f"image_{idx + 1:03}.png"
             metadata = {
                 "path": output_ref(str(path)),
@@ -1282,7 +1273,7 @@ class App(tk.Tk if tk else object):
                 "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
             try:
-                client.generate(prompt, negative, uc_prompt, path)
+                client.generate(prompt, negative, path)
                 items.append(metadata)
                 self.after(0, self.log_line, f"{idx + 1}/{count} 완료: {path.name}")
             except Exception as exc:

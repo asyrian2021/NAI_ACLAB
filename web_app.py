@@ -78,7 +78,6 @@ def state_from_dict(data: dict) -> AppState:
         character_presets=[dataclass_from_dict(CharacterPreset, item) for item in data.get("character_presets", [])],
         quality_override_prompt=quality_override,
         negative_prompt=data.get("negative_prompt", ""),
-        uc_prompt=data.get("uc_prompt", data.get("negative_prompt", "")),
         api=dataclass_from_dict(ApiSettings, data.get("api", {})),
         generation=dataclass_from_dict(GenerationSettings, data.get("generation", {})),
         batting_scenes=[dataclass_from_dict(BattingScene, item) for item in data.get("batting_scenes", [])],
@@ -210,7 +209,7 @@ def fixed_artist_tags(state: AppState) -> list[dict]:
     return result
 
 
-def build_prompt(state: AppState) -> tuple[str, str, str, list[dict]]:
+def build_prompt(state: AppState) -> tuple[str, str, list[dict]]:
     base = selected_base(state)
     character = selected_character(state)
     artists = fixed_artist_tags(state) or random_artist_tags(state)
@@ -238,8 +237,7 @@ def build_prompt(state: AppState) -> tuple[str, str, str, list[dict]]:
     if character:
         negative.extend(item.strip() for item in character.negatives if item.strip())
     negative_prompt = ", ".join(item for item in negative if item)
-    uc_prompt = state.uc_prompt.strip() or negative_prompt
-    return " | ".join(prompt_parts), negative_prompt, uc_prompt, artists
+    return " | ".join(prompt_parts), negative_prompt, artists
 
 
 def save_incoming_state(data: dict) -> AppState:
@@ -313,7 +311,7 @@ def run_generation(job_id: str, state: AppState) -> None:
             cancelled = True
             JOBS[job_id]["log"].append("중지 요청으로 남은 생성을 건너뜁니다.")
             break
-        prompt, negative, uc_prompt, artists = build_prompt(state)
+        prompt, negative, artists = build_prompt(state)
         path = out_dir / f"image_{idx + 1:03}.png"
         metadata = {
             "path": output_ref(str(path)),
@@ -321,7 +319,7 @@ def run_generation(job_id: str, state: AppState) -> None:
             "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
         try:
-            client.generate(prompt, negative, uc_prompt, path)
+            client.generate(prompt, negative, path)
             JOBS[job_id]["log"].append(f"{idx + 1}/{count} 완료: {path.name}")
         except Exception as exc:
             metadata["error"] = str(exc)
@@ -417,7 +415,7 @@ def run_batting_test(job_id: str, state: AppState) -> None:
                 cancelled = True
                 JOBS[job_id]["log"].append(f"{scene_name}: 중지 요청으로 남은 이미지를 건너뜁니다.")
                 break
-            prompt, negative, uc_prompt, artists = build_prompt(current)
+            prompt, negative, artists = build_prompt(current)
             path = scene_dir / f"image_{image_index + 1:03}.png"
             metadata = {
                 "path": output_ref(str(path)),
@@ -432,7 +430,7 @@ def run_batting_test(job_id: str, state: AppState) -> None:
                 "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
             try:
-                client.generate(prompt, negative, uc_prompt, path)
+                client.generate(prompt, negative, path)
                 JOBS[job_id]["log"].append(f"{scene_name} {image_index + 1}/{count} 완료: {path.name}")
             except Exception as exc:
                 metadata["error"] = str(exc)
@@ -536,8 +534,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(403)
                 return
             state = load_state()
-            prompt, negative, uc_prompt, artists = build_prompt(state)
-            self.send_json({"prompt": prompt, "negative": negative, "uc": uc_prompt, "artists": artists})
+            prompt, negative, artists = build_prompt(state)
+            self.send_json({"prompt": prompt, "negative": negative, "artists": artists})
         elif route == "/api/job":
             if not self.authorized_api_request():
                 self.send_error(403)
@@ -566,8 +564,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"state": state_payload(state)})
         elif route == "/api/preview":
             state = save_incoming_state(data.get("state", data))
-            prompt, negative, uc_prompt, artists = build_prompt(state)
-            self.send_json({"prompt": prompt, "negative": negative, "uc": uc_prompt, "artists": artists})
+            prompt, negative, artists = build_prompt(state)
+            self.send_json({"prompt": prompt, "negative": negative, "artists": artists})
         elif route == "/api/generate":
             if active_job():
                 self.send_json({"error": "이미 생성 작업이 진행 중입니다."}, status=409)
