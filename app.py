@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import math
 import os
 import random
 import re
@@ -159,6 +160,9 @@ def sanitize_history_item(item: dict) -> dict:
         for key, value in dict(item or {}).items()
         if key not in {"prompt", "negative_prompt", "uc_prompt", "request_path", "request_url"}
     }
+    if "style_rating" not in clean and "rating" in clean:
+        clean["style_rating"] = clean.get("rating")
+    clean.pop("rating", None)
     if "path" in clean:
         clean["path"] = output_ref(clean.get("path", ""))
     return clean
@@ -264,6 +268,11 @@ class Category:
     max_weight: float
     granule: float
     picks: int = 0
+    learning_role: str = ""
+
+    def __post_init__(self) -> None:
+        if self.learning_role not in {"style", "stability"}:
+            self.learning_role = "stability" if "안정" in self.name else "style"
 
 
 @dataclass
@@ -280,6 +289,14 @@ class CharacterPreset:
     prompts: list[str] = field(default_factory=lambda: ["", "", ""])
     negatives: list[str] = field(default_factory=lambda: ["", "", ""])
     quality_override_prompt: str = ""
+
+
+@dataclass
+class PresetSet:
+    name: str
+    base_preset: str = ""
+    character_preset: str = ""
+    auto: bool = False
 
 
 @dataclass
@@ -303,6 +320,7 @@ class ApiSettings:
 
 @dataclass
 class GenerationSettings:
+    preset_set: str = ""
     base_preset: str = ""
     character_preset: str = ""
     count: int = 4
@@ -315,6 +333,7 @@ class GenerationSettings:
 @dataclass
 class BattingScene:
     name: str = ""
+    preset_set: str = ""
     base_preset: str = ""
     character_preset: str = ""
     image_size: str = "portrait"
@@ -326,6 +345,7 @@ class AppState:
     categories: list[Category] = field(default_factory=list)
     base_presets: list[PromptPreset] = field(default_factory=list)
     character_presets: list[CharacterPreset] = field(default_factory=list)
+    preset_sets: list[PresetSet] = field(default_factory=list)
     quality_override_prompt: str = ""
     negative_prompt: str = "lowres, bad anatomy, bad hands, text, error, missing fingers"
     api: ApiSettings = field(default_factory=ApiSettings)
@@ -334,11 +354,321 @@ class AppState:
     history: list[dict] = field(default_factory=list)
 
 
+def sync_auto_preset_sets(state: AppState) -> AppState:
+    base_names = {item.name for item in state.base_presets if item.name.strip()}
+    character_names = {item.name for item in state.character_presets if item.name.strip()}
+    manual_sets = [
+        item
+        for item in state.preset_sets
+        if not item.auto and item.base_preset in base_names and item.character_preset in character_names
+    ]
+    used_names = {item.name for item in manual_sets}
+    auto_sets: list[PresetSet] = []
+    for common_name in sorted(base_names & character_names):
+        matching_manual = next(
+            (
+                item
+                for item in manual_sets
+                if item.base_preset == common_name and item.character_preset == common_name
+            ),
+            None,
+        )
+        if matching_manual:
+            continue
+        set_name = common_name
+        if set_name in used_names:
+            base_name = f"{common_name} (자동)"
+            set_name = base_name
+            suffix = 2
+            while set_name in used_names:
+                set_name = f"{base_name} {suffix}"
+                suffix += 1
+        used_names.add(set_name)
+        auto_sets.append(PresetSet(set_name, common_name, common_name, True))
+    state.preset_sets = manual_sets + auto_sets
+
+    valid_set_names = {item.name for item in state.preset_sets}
+    if state.generation.preset_set not in valid_set_names:
+        matching_set = next(
+            (
+                item
+                for item in state.preset_sets
+                if item.base_preset == state.generation.base_preset
+                and item.character_preset == state.generation.character_preset
+            ),
+            None,
+        )
+        state.generation.preset_set = matching_set.name if matching_set else ""
+    if state.generation.preset_set:
+        selected_set = next(item for item in state.preset_sets if item.name == state.generation.preset_set)
+        state.generation.base_preset = selected_set.base_preset
+        state.generation.character_preset = selected_set.character_preset
+    for scene in state.batting_scenes:
+        if scene.preset_set not in valid_set_names:
+            matching_set = next(
+                (
+                    item
+                    for item in state.preset_sets
+                    if item.base_preset == scene.base_preset
+                    and item.character_preset == scene.character_preset
+                ),
+                None,
+            )
+            scene.preset_set = matching_set.name if matching_set else ""
+        if scene.preset_set:
+            selected_set = next(item for item in state.preset_sets if item.name == scene.preset_set)
+            scene.base_preset = selected_set.base_preset
+            scene.character_preset = selected_set.character_preset
+    return state
+
+
+ARTIST_RATING_PRIOR_COUNT = 4
+ARTIST_RATING_PRIOR_VALUE = 3.0
+
+
+def _artist_learning_role(artist: dict) -> str:
+    role = str(artist.get("learning_role", "")).strip().lower()
+    if role in {"style", "stability"}:
+        return role
+    return "stability" if "안정" in str(artist.get("category", "")) else "style"
+
+
+def _rating_value(item: dict, field: str) -> int:
+    value = item.get(field)
+    if value in (None, "") and field == "style_rating":
+        value = item.get("rating")
+    try:
+        rating = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return rating if 1 <= rating <= 5 else 0
+
+
+def _finish_rating_entry(entry: dict) -> dict:
+    count = entry["count"]
+    smoothed = (
+        entry["rating_sum"] + ARTIST_RATING_PRIOR_VALUE * ARTIST_RATING_PRIOR_COUNT
+    ) / (count + ARTIST_RATING_PRIOR_COUNT)
+    signal = max(-1.0, min(1.0, (smoothed - ARTIST_RATING_PRIOR_VALUE) / 2.0))
+    entry["average_rating"] = round(entry["rating_sum"] / count, 3)
+    entry["smoothed_rating"] = round(smoothed, 3)
+    entry["preference_signal"] = signal
+    entry["selection_multiplier"] = round(math.exp(signal), 3)
+    return entry
+
+
+def artist_rating_summary(history: list[dict]) -> dict[str, dict]:
+    summary: dict[str, dict] = {}
+    for history_entry in history or []:
+        if history_entry.get("type") == "batting_test":
+            continue
+        for item in history_entry.get("items", []) or []:
+            rating = _rating_value(item, "style_rating")
+            if not rating:
+                continue
+            seen = set()
+            for artist in item.get("artists", []) or []:
+                if _artist_learning_role(artist) != "style":
+                    continue
+                tag = str(artist.get("tag", "")).strip()
+                key = tag.casefold()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                entry = summary.setdefault(key, {"tag": tag, "count": 0, "rating_sum": 0.0})
+                entry["count"] += 1
+                entry["rating_sum"] += rating
+
+    for entry in summary.values():
+        _finish_rating_entry(entry)
+    return summary
+
+
+def stability_rating_summary(history: list[dict]) -> dict[str, dict]:
+    summary: dict[str, dict] = {}
+    for history_entry in history or []:
+        if history_entry.get("type") == "batting_test":
+            continue
+        for item in history_entry.get("items", []) or []:
+            rating = _rating_value(item, "stability_rating")
+            if not rating:
+                continue
+            seen = set()
+            for artist in item.get("artists", []) or []:
+                if _artist_learning_role(artist) != "stability":
+                    continue
+                tag = str(artist.get("tag", "")).strip()
+                try:
+                    weight = round(float(artist.get("weight", 1.0)), 6)
+                except (TypeError, ValueError):
+                    continue
+                key = tag.casefold()
+                pair_key = (key, weight)
+                if not key or pair_key in seen:
+                    continue
+                seen.add(pair_key)
+                entry = summary.setdefault(
+                    key,
+                    {"tag": tag, "count": 0, "rating_sum": 0.0, "weights": {}},
+                )
+                entry["count"] += 1
+                entry["rating_sum"] += rating
+                weight_entry = entry["weights"].setdefault(
+                    weight,
+                    {"weight": weight, "count": 0, "rating_sum": 0.0},
+                )
+                weight_entry["count"] += 1
+                weight_entry["rating_sum"] += rating
+
+    for entry in summary.values():
+        _finish_rating_entry(entry)
+        weight_rows = []
+        for weight_entry in entry["weights"].values():
+            _finish_rating_entry(weight_entry)
+            weight_rows.append(weight_entry)
+        weight_rows.sort(key=lambda row: row["weight"])
+        best = max(
+            weight_rows,
+            key=lambda row: (row["smoothed_rating"], row["count"], -abs(row["weight"])),
+        )
+        entry["weights"] = weight_rows
+        entry["best_weight"] = best["weight"]
+        entry["best_smoothed_rating"] = best["smoothed_rating"]
+        entry["tested_weight_count"] = len(weight_rows)
+        best_signal = max(-1.0, min(1.0, (best["smoothed_rating"] - ARTIST_RATING_PRIOR_VALUE) / 2.0))
+        entry["selection_multiplier"] = round(math.exp(best_signal), 3)
+    return summary
+
+
+def _weighted_sample_without_replacement(items: list[str], count: int, weights: list[float]) -> list[str]:
+    pool = list(items)
+    pool_weights = [max(0.001, float(value)) for value in weights]
+    result: list[str] = []
+    for _ in range(min(count, len(pool))):
+        selected_index = random.choices(range(len(pool)), weights=pool_weights, k=1)[0]
+        result.append(pool.pop(selected_index))
+        pool_weights.pop(selected_index)
+    return result
+
+
+def _adaptive_weight(values: list[float], preference_signal: float) -> float:
+    if not values:
+        return 1.0
+    if len(values) == 1 or abs(preference_signal) < 0.001:
+        return random.choice(values)
+    likelihoods = []
+    for index in range(len(values)):
+        position = index / (len(values) - 1)
+        likelihoods.append(math.exp(1.35 * preference_signal * (position * 2.0 - 1.0)))
+    return random.choices(values, weights=likelihoods, k=1)[0]
+
+
+def _stability_weight(values: list[float], rating: dict) -> float:
+    if not values:
+        return 1.0
+    if not rating:
+        return random.choice(values)
+    observed = {round(float(row["weight"]), 6): row for row in rating.get("weights", [])}
+    likelihoods = []
+    for value in values:
+        row = observed.get(round(float(value), 6), {})
+        count = int(row.get("count", 0))
+        estimate = float(row.get("smoothed_rating", ARTIST_RATING_PRIOR_VALUE))
+        exploration_bonus = 0.55 / math.sqrt(count + 1)
+        likelihoods.append(math.exp(1.45 * (estimate + exploration_bonus - ARTIST_RATING_PRIOR_VALUE)))
+    return random.choices(values, weights=likelihoods, k=1)[0]
+
+
+def random_artist_tags_for_state(state: AppState) -> list[dict]:
+    result = []
+    style_ratings = artist_rating_summary(state.history)
+    stability_ratings = stability_rating_summary(state.history)
+    for category in state.categories:
+        tags = parse_artist_tags(category.tags)
+        if not tags:
+            continue
+        role = category.learning_role if category.learning_role in {"style", "stability"} else "style"
+        ratings = style_ratings if role == "style" else stability_ratings
+        values = float_range(category.min_weight, category.max_weight, category.granule)
+        pick_count = len(tags) if category.picks <= 0 else min(category.picks, len(tags))
+        selection_weights = [ratings.get(tag.casefold(), {}).get("selection_multiplier", 1.0) for tag in tags]
+        selected_tags = _weighted_sample_without_replacement(tags, pick_count, selection_weights)
+        for tag in selected_tags:
+            rating = ratings.get(tag.casefold(), {})
+            weight = (
+                _adaptive_weight(values, float(rating.get("preference_signal", 0.0)))
+                if role == "style"
+                else _stability_weight(values, rating)
+            )
+            result.append(
+                {
+                    "category": category.name,
+                    "learning_role": role,
+                    "tag": tag,
+                    "weight": weight,
+                    "prompt": weight_tag(tag, weight),
+                    "rating_count": int(rating.get("count", 0)),
+                    "learned_rating": rating.get("smoothed_rating"),
+                }
+            )
+    return result
+
+
+def fixed_artist_tags_for_state(state: AppState) -> list[dict]:
+    result = []
+    for item in state.generation.fixed_artists or []:
+        tag = str(item.get("tag", "")).strip()
+        if not tag:
+            continue
+        try:
+            weight = float(item.get("weight", 1.0))
+        except (TypeError, ValueError):
+            weight = 1.0
+        result.append(
+            {
+                "category": item.get("category", "fixed"),
+                "learning_role": item.get("learning_role") or _artist_learning_role(item),
+                "tag": tag,
+                "weight": weight,
+                "prompt": item.get("prompt") or weight_tag(tag, weight),
+            }
+        )
+    return result
+
+
+def order_artist_tags(artists: list[dict]) -> list[dict]:
+    if len(artists) < 2:
+        return list(artists)
+    shuffled = list(artists)
+    random.shuffle(shuffled)
+    ranked = sorted(shuffled, key=lambda item: float(item.get("weight", 0.0)), reverse=True)
+    ordered: list[dict | None] = [None] * len(ranked)
+    left = 0
+    right = len(ranked) - 1
+    highest_at_front = bool(random.getrandbits(1))
+    for index, artist in enumerate(ranked):
+        place_front = highest_at_front if index % 2 == 0 else not highest_at_front
+        if place_front:
+            ordered[left] = artist
+            left += 1
+        else:
+            ordered[right] = artist
+            right -= 1
+    return [item for item in ordered if item is not None]
+
+
+def artist_tags_for_prompt(state: AppState) -> list[dict]:
+    fixed = fixed_artist_tags_for_state(state)
+    if fixed:
+        return fixed
+    return order_artist_tags(random_artist_tags_for_state(state))
+
+
 def default_state() -> AppState:
-    return AppState(
+    return sync_auto_preset_sets(AppState(
         categories=[
-            Category("메인 그림체 작가", [], 1.0, 1.4, 0.05, 0),
-            Category("그림체 안정화 작가", [], 0.4, 0.9, 0.1, 0),
+            Category("메인 그림체 작가", [], 1.0, 1.4, 0.05, 0, "style"),
+            Category("그림체 안정화 작가", [], 0.4, 0.9, 0.1, 0, "stability"),
         ],
         base_presets=[
             PromptPreset("기본", "", "masterpiece, best quality, very aesthetic, detailed illustration"),
@@ -346,7 +676,7 @@ def default_state() -> AppState:
         character_presets=[
             CharacterPreset("1인 기본", ["1girl, looking at viewer, detailed eyes", "", ""], ["", "", ""]),
         ],
-    )
+    ))
 
 
 def load_state() -> AppState:
@@ -386,10 +716,11 @@ def load_state() -> AppState:
             encoding="utf-8",
         )
     api_data["token"] = load_api_token()
-    return AppState(
+    state = AppState(
         categories=[Category(**item) for item in data.get("categories", [])],
         base_presets=[PromptPreset(**item) for item in base_data],
         character_presets=[CharacterPreset(**item) for item in data.get("character_presets", [])],
+        preset_sets=[PresetSet(**item) for item in data.get("preset_sets", [])],
         quality_override_prompt=quality_override,
         negative_prompt=data.get("negative_prompt", ""),
         api=ApiSettings(**api_data),
@@ -397,10 +728,12 @@ def load_state() -> AppState:
         batting_scenes=[BattingScene(**item) for item in data.get("batting_scenes", [])],
         history=[sanitize_history_entry(item) for item in data.get("history", [])],
     )
+    return sync_auto_preset_sets(state)
 
 
 def save_state(state: AppState) -> None:
     ensure_dirs()
+    sync_auto_preset_sets(state)
     STATE_PATH.write_text(
         json.dumps(state_dict_without_secrets(state), ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -1180,22 +1513,12 @@ class App(tk.Tk if tk else object):
         save_state(self.state_data)
 
     def random_artist_tags(self) -> list[dict]:
-        result = []
-        for cat in self.state_data.categories:
-            tags = parse_artist_tags(cat.tags)
-            if not tags:
-                continue
-            weights = float_range(cat.min_weight, cat.max_weight, cat.granule)
-            pick_count = len(tags) if cat.picks <= 0 else min(cat.picks, len(tags))
-            for tag in random.sample(tags, pick_count):
-                weight = random.choice(weights) if weights else cat.min_weight
-                result.append({"category": cat.name, "tag": tag, "weight": weight, "prompt": weight_tag(tag, weight)})
-        return result
+        return random_artist_tags_for_state(self.state_data)
 
     def build_prompt(self) -> tuple[str, str, list[dict]]:
         base = self.find_base()
         char = self.find_char()
-        artists = self.random_artist_tags()
+        artists = order_artist_tags(self.random_artist_tags())
         base_chunks = []
         if base and base.prompt.strip():
             base_chunks.append(base.prompt.strip())

@@ -18,6 +18,7 @@ let worldcupMatchNumber = 0;
 let worldcupRunnerUp = null;
 let selectedHistoryIds = new Set();
 let liveItems = [];
+let battingLiveItems = [];
 let compareHistoryValue = "0";
 let compareSelectionTouched = false;
 let modalItem = null;
@@ -36,6 +37,7 @@ const pageCopy = {
   generate: ["이미지 생성", "프리셋과 작가 조합을 골라 이미지를 만듭니다."],
   batting: ["타율 테스트", "같은 작가 가중치로 여러 장면을 만들어 일관성을 확인합니다."],
   artists: ["작가 태그", "랜덤으로 조합할 작가와 가중치 범위를 설정합니다."],
+  learning: ["취향 학습", "이미지 평점이 작가 선택과 가중치에 어떻게 반영되는지 확인합니다."],
   presets: ["프롬프트 프리셋", "자주 쓰는 장면과 캐릭터 프롬프트를 저장합니다."],
   settings: ["API 설정", "NovelAI 연결과 이미지 생성 세부값을 설정합니다."],
   compare: ["가중치 비교", "한 히스토리의 이미지와 작가 가중치를 나란히 비교합니다."],
@@ -216,6 +218,7 @@ async function saveNow() {
 
 function syncEditorsToState() {
   if (!state) return;
+  state.generation.preset_set = $("#presetSetSelect")?.value || "";
   state.generation.base_preset = $("#baseSelect").value;
   state.generation.character_preset = $("#charSelect").value;
   state.generation.count = Math.max(1, Number($("#countInput").value || 1));
@@ -226,6 +229,7 @@ function syncEditorsToState() {
   const category = state.categories[categoryIndex];
   if (category) {
     category.name = $("#catName").value.trim() || "이름 없는 카테고리";
+    category.learning_role = $("#catLearningRole")?.value === "stability" ? "stability" : "style";
     category.min_weight = Number($("#catMin").value || 0);
     category.max_weight = Number($("#catMax").value || 0);
     category.granule = Number($("#catGranule").value || 0.1);
@@ -239,6 +243,7 @@ function syncEditorsToState() {
     base.name = $("#baseName").value.trim() || "이름 없는 베이스";
     renameRecentPreset("base", oldName, base.name);
     renameBattingScenePreset("base", oldName, base.name);
+    renamePresetSetReferences("base", oldName, base.name);
     updatePresetNameSurfaces("base", oldName, base.name);
     base.prompt = $("#basePrompt").value.trim();
     base.quality_prompt = $("#qualityPrompt").value.trim();
@@ -251,10 +256,13 @@ function syncEditorsToState() {
     character.name = $("#charName").value.trim() || "이름 없는 캐릭터";
     renameRecentPreset("character", oldName, character.name);
     renameBattingScenePreset("character", oldName, character.name);
+    renamePresetSetReferences("character", oldName, character.name);
     updatePresetNameSurfaces("character", oldName, character.name);
     character.prompts = [0, 1, 2].map((i) => $(`#charPrompt${i}`).value.trim());
     character.negatives = [0, 1, 2].map((i) => $(`#charNegative${i}`).value.trim());
   }
+
+  ensureAutoPresetSets();
 
   state.negative_prompt = $("#negativePrompt").value.trim();
 
@@ -276,6 +284,7 @@ function syncBattingScenesToState() {
   }
   state.batting_scenes = rows.map((row, index) => ({
     name: row.querySelector(".batting-scene-name")?.value.trim() || `Scene ${index + 1}`,
+    preset_set: row.querySelector(".batting-scene-set")?.value || "",
     base_preset: row.querySelector(".batting-scene-base")?.value || "",
     character_preset: row.querySelector(".batting-scene-character")?.value || "",
     image_size: normalizeImageSizeKey(row.querySelector(".batting-scene-size")?.value || state.generation?.image_size || "portrait"),
@@ -307,6 +316,97 @@ function fillImageSizeSelect() {
   }
   const saved = state.generation.image_size;
   select.value = imageSizeOptions[saved] ? saved : "portrait";
+}
+
+function matchingPresetSetName(baseName, characterName) {
+  return (state.preset_sets || []).find(
+    (item) => item.base_preset === baseName && item.character_preset === characterName
+  )?.name || "";
+}
+
+function uniquePresetSetName(baseName) {
+  return uniqueName(state.preset_sets || [], baseName);
+}
+
+function ensureAutoPresetSets() {
+  state.preset_sets = state.preset_sets || [];
+  const baseNames = new Set((state.base_presets || []).map((item) => item.name).filter(Boolean));
+  const characterNames = new Set((state.character_presets || []).map((item) => item.name).filter(Boolean));
+  const manualSets = state.preset_sets.filter(
+    (item) => !item.auto && baseNames.has(item.base_preset) && characterNames.has(item.character_preset)
+  );
+  const usedNames = new Set(manualSets.map((item) => item.name));
+  const autoSets = [];
+  [...baseNames].filter((name) => characterNames.has(name)).sort().forEach((commonName) => {
+    if (manualSets.some((item) => item.base_preset === commonName && item.character_preset === commonName)) return;
+    let setName = commonName;
+    if (usedNames.has(setName)) {
+      const autoBase = `${commonName} (자동)`;
+      setName = autoBase;
+      let suffix = 2;
+      while (usedNames.has(setName)) {
+        setName = `${autoBase} ${suffix}`;
+        suffix += 1;
+      }
+    }
+    usedNames.add(setName);
+    autoSets.push({ name: setName, base_preset: commonName, character_preset: commonName, auto: true });
+  });
+  state.preset_sets = [...manualSets, ...autoSets];
+  const validNames = new Set(state.preset_sets.map((item) => item.name));
+  if (!validNames.has(state.generation.preset_set)) {
+    state.generation.preset_set = matchingPresetSetName(
+      state.generation.base_preset,
+      state.generation.character_preset
+    );
+  }
+  (state.batting_scenes || []).forEach((scene) => {
+    if (!validNames.has(scene.preset_set)) {
+      scene.preset_set = matchingPresetSetName(scene.base_preset, scene.character_preset);
+    }
+  });
+}
+
+function fillPresetSetSelect(select, selectedName, directLabel = "직접 조합") {
+  if (!select) return;
+  select.innerHTML = "";
+  const direct = document.createElement("option");
+  direct.value = "";
+  direct.textContent = directLabel;
+  select.appendChild(direct);
+  for (const item of state.preset_sets || []) {
+    const option = document.createElement("option");
+    option.value = item.name;
+    option.textContent = item.name;
+    select.appendChild(option);
+  }
+  select.value = (state.preset_sets || []).some((item) => item.name === selectedName) ? selectedName : "";
+}
+
+function presetSetOptionsHtml(selectedName, directLabel = "직접 조합") {
+  const options = [`<option value="">${escapeHtml(directLabel)}</option>`];
+  for (const item of state.preset_sets || []) {
+    options.push(`<option value="${escapeHtml(item.name)}" ${item.name === selectedName ? "selected" : ""}>${escapeHtml(item.name)}</option>`);
+  }
+  return options.join("");
+}
+
+function applyGenerationPresetSet(setName) {
+  const presetSet = (state.preset_sets || []).find((item) => item.name === setName);
+  state.generation.preset_set = presetSet?.name || "";
+  if (!presetSet) return;
+  state.generation.base_preset = presetSet.base_preset;
+  state.generation.character_preset = presetSet.character_preset;
+  rememberPreset("base", presetSet.base_preset);
+  rememberPreset("character", presetSet.character_preset);
+}
+
+function updateGenerationPresetSetFromPair() {
+  state.generation.preset_set = matchingPresetSetName(
+    state.generation.base_preset,
+    state.generation.character_preset
+  );
+  fillPresetSetSelect($("#presetSetSelect"), state.generation.preset_set);
 }
 
 function normalizeImageSizeKey(value, fallback = "portrait") {
@@ -435,6 +535,16 @@ function renderPresetButtons(root, items, selectedIndex, indexes, kind) {
     button.onclick = () => selectPreset(kind, index);
     root.appendChild(button);
   }
+}
+
+function renamePresetSetReferences(kind, oldName, newName) {
+  if (!oldName || !newName || oldName === newName || !state) return;
+  const key = kind === "base" ? "base_preset" : "character_preset";
+  if (state.generation?.[key] === oldName) state.generation[key] = newName;
+  state.preset_sets = (state.preset_sets || []).map((item) => ({
+    ...item,
+    [key]: item[key] === oldName ? newName : item[key],
+  }));
 }
 
 function hasConfiguredArtists() {
@@ -584,6 +694,7 @@ function selectOptionsHtml(items, selectedName) {
 }
 
 function renderBatting() {
+  ensureAutoPresetSets();
   state.batting_scenes = state.batting_scenes || [];
   renderBattingFixedArtists();
   renderBattingReadiness();
@@ -609,9 +720,14 @@ function renderBatting() {
     const row = document.createElement("article");
     row.className = "batting-scene-row";
     const sceneSize = normalizeImageSizeKey(scene.image_size || state.generation?.image_size || "portrait");
+    const sceneSetName = (state.preset_sets || []).some((item) => item.name === scene.preset_set)
+      ? scene.preset_set
+      : matchingPresetSetName(scene.base_preset, scene.character_preset);
+    scene.preset_set = sceneSetName;
     row.innerHTML = `
       <div class="batting-scene-number">${index + 1}</div>
       <label><span>씬 이름</span><input class="batting-scene-name" value="${escapeHtml(scene.name || `Scene ${index + 1}`)}" /></label>
+      <label><span>프리셋 세트</span><select class="batting-scene-set">${presetSetOptionsHtml(sceneSetName)}</select></label>
       <label><span>베이스 + 퀄리티</span><select class="batting-scene-base">${selectOptionsHtml(state.base_presets, scene.base_preset)}</select></label>
       <label><span>캐릭터</span><select class="batting-scene-character">${selectOptionsHtml(state.character_presets, scene.character_preset)}</select></label>
       <label><span>이미지 해상도</span><select class="batting-scene-size">${imageSizeOptionsHtml(sceneSize)}</select></label>
@@ -619,12 +735,24 @@ function renderBatting() {
       <button class="icon-button batting-scene-delete" type="button" title="씬 삭제">×</button>
     `;
     row.querySelector(".batting-scene-delete").onclick = () => deleteBattingScene(index);
+    const setSelect = row.querySelector(".batting-scene-set");
+    const baseSelect = row.querySelector(".batting-scene-base");
+    const characterSelect = row.querySelector(".batting-scene-character");
     row.querySelectorAll("input, select").forEach((node) => {
       node.oninput = () => {
         syncBattingScenesToState();
         scheduleSave();
       };
       node.onchange = () => {
+        if (node === setSelect) {
+          const presetSet = (state.preset_sets || []).find((item) => item.name === setSelect.value);
+          if (presetSet) {
+            baseSelect.value = presetSet.base_preset;
+            characterSelect.value = presetSet.character_preset;
+          }
+        } else if (node === baseSelect || node === characterSelect) {
+          setSelect.value = matchingPresetSetName(baseSelect.value, characterSelect.value);
+        }
         syncBattingScenesToState();
         scheduleSave();
       };
@@ -638,6 +766,7 @@ function renderAll() {
   renderGenerate();
   renderBatting();
   renderArtists();
+  renderArtistLearning();
   renderPresets();
   renderSettings();
   renderHistory();
@@ -645,11 +774,13 @@ function renderAll() {
 }
 
 function renderGenerate() {
+  ensureAutoPresetSets();
   state.generation.recent_base_presets = state.generation.recent_base_presets || [];
   state.generation.recent_character_presets = state.generation.recent_character_presets || [];
   state.generation.image_size = imageSizeOptions[state.generation.image_size] ? state.generation.image_size : "portrait";
   fillSelect($("#baseSelect"), state.base_presets, state.generation.base_preset);
   fillSelect($("#charSelect"), state.character_presets, state.generation.character_preset);
+  fillPresetSetSelect($("#presetSetSelect"), state.generation.preset_set);
   fillImageSizeSelect();
   $("#countInput").value = state.generation.count || 1;
   state.generation.fixed_artists = state.generation.fixed_artists || [];
@@ -679,6 +810,7 @@ function renderArtists() {
   });
   const category = state.categories[categoryIndex];
   $("#catName").value = category?.name || "";
+  $("#catLearningRole").value = category?.learning_role === "stability" ? "stability" : "style";
   $("#catMin").value = category?.min_weight ?? "";
   $("#catMax").value = category?.max_weight ?? "";
   $("#catGranule").value = category?.granule ?? "";
@@ -696,13 +828,227 @@ function renderCategoryWeightPreview() {
   if (!range || !category) return;
   const tagCount = parseArtistTags(category.tags || []).length;
   const useCount = category.picks > 0 ? Math.min(category.picks, tagCount) : tagCount;
+  const roleLabel = category.learning_role === "stability" ? "신체 안정성" : "화풍 만족도";
   range.className = `inline-notice compact-notice ${tagCount ? "success" : "warning"}`;
   range.textContent = tagCount
-    ? `생성할 때 이 카테고리에서 ${useCount}개 태그를 고르고, 각 가중치를 ${category.min_weight}~${category.max_weight} 범위에서 ${category.granule} 간격으로 정합니다.`
+    ? `생성할 때 이 카테고리에서 ${useCount}개 태그를 고르고, 각 가중치를 ${category.min_weight}~${category.max_weight} 범위에서 ${category.granule} 간격으로 정합니다. ${roleLabel} 평점으로 학습합니다.`
     : "인식된 artist 태그가 없습니다. 위 입력 예시처럼 태그를 추가하세요.";
 }
 
+function artistPreferenceStatus(signal) {
+  if (signal >= 0.22) return { label: "강한 선호", className: "strong-positive", weight: "높은 가중치 우선" };
+  if (signal >= 0.07) return { label: "선호", className: "positive", weight: "높은 가중치 쪽" };
+  if (signal <= -0.22) return { label: "비선호", className: "strong-negative", weight: "낮은 가중치 우선" };
+  if (signal <= -0.07) return { label: "덜 선호", className: "negative", weight: "낮은 가중치 쪽" };
+  return { label: "중립", className: "neutral", weight: "범위 내 균등" };
+}
+
+function learningPhase(ratedImages) {
+  if (!ratedImages) return { label: "학습 대기", detail: "이미지에 평점을 남겨주세요." };
+  if (ratedImages < 5) return { label: "초기 학습", detail: "평가가 더 쌓이면 취향 차이가 선명해집니다." };
+  if (ratedImages < 15) return { label: "학습 중", detail: "최근 평가가 생성 확률에 반영되고 있습니다." };
+  return { label: "학습 안정화", detail: "충분한 평가를 바탕으로 취향을 반영합니다." };
+}
+
+function appendLearningStatus(root, label, value, detail, tone = "") {
+  const card = document.createElement("article");
+  card.className = `learning-status-card ${tone}`;
+  const labelNode = document.createElement("span");
+  labelNode.textContent = label;
+  const valueNode = document.createElement("strong");
+  valueNode.textContent = value;
+  const detailNode = document.createElement("small");
+  detailNode.textContent = detail;
+  card.append(labelNode, valueNode, detailNode);
+  root.appendChild(card);
+}
+
+function renderArtistLearning() {
+  const summary = state?.artist_rating_summary || [];
+  const stabilitySummary = state?.stability_rating_summary || [];
+  const summaryNode = $("#artistLearningSummary");
+  const statusRoot = $("#artistLearningStatus");
+  const categoryList = $("#artistLearningCategoryList");
+  const list = $("#artistLearningList");
+  const stabilityList = $("#stabilityLearningList");
+  const resetButton = $("#resetArtistRatingsButton");
+  if (!summaryNode || !statusRoot || !categoryList || !list || !stabilityList || !resetButton) return;
+  const ratedImages = (field) => (state.history || []).reduce(
+    (total, history) => total + (history.type === "batting_test" ? 0 : (history.items || []).filter((item) => Number(item[field]) >= 1).length),
+    0
+  );
+  const styleRatedImages = ratedImages("style_rating");
+  const stabilityRatedImages = ratedImages("stability_rating");
+  const totalRatedImages = Math.max(styleRatedImages, stabilityRatedImages);
+  summaryNode.textContent = totalRatedImages
+    ? `화풍 평가 ${styleRatedImages}장 · 신체 안정성 평가 ${stabilityRatedImages}장`
+    : "아직 평가된 이미지가 없습니다.";
+  resetButton.disabled = totalRatedImages === 0;
+  statusRoot.innerHTML = "";
+  const stylePhase = learningPhase(styleRatedImages);
+  const stabilityPhase = learningPhase(stabilityRatedImages);
+  const categoryStates = (state?.categories || []).map((category) => {
+    const tagCount = parseArtistTags(category.tags || []).length;
+    const selectedCount = category.picks > 0 ? Math.min(category.picks, tagCount) : tagCount;
+    return { category, tagCount, selectedCount, active: tagCount > 0 && selectedCount < tagCount };
+  });
+  const favorite = summary[0];
+  const bestStability = stabilitySummary[0];
+  appendLearningStatus(statusRoot, "화풍 학습", stylePhase.label, `${styleRatedImages}장 평가 · ${summary.length}명 학습`, styleRatedImages ? "active" : "");
+  appendLearningStatus(
+    statusRoot,
+    "화풍 1순위",
+    favorite?.tag || "아직 없음",
+    favorite ? `보정 평점 ${Number(favorite.smoothed_rating || 3).toFixed(2)} · 평가 ${favorite.count}회` : "선호 작가를 찾으려면 평점을 더 남겨주세요.",
+    favorite ? "favorite" : ""
+  );
+  appendLearningStatus(
+    statusRoot,
+    "신체 안정성 학습",
+    stabilityPhase.label,
+    `${stabilityRatedImages}장 평가 · ${stabilitySummary.length}명 학습`,
+    stabilityRatedImages ? "active" : ""
+  );
+  appendLearningStatus(
+    statusRoot,
+    "안정화 추천",
+    bestStability ? `${bestStability.tag} · ${bestStability.best_weight}` : "아직 없음",
+    bestStability ? `추천값 보정 평점 ${Number(bestStability.best_smoothed_rating || 3).toFixed(2)} · 총 ${bestStability.count}회` : "신체 안정성 평점을 남기면 작가별 추천 가중치를 계산합니다.",
+    bestStability ? "favorite" : ""
+  );
+  categoryList.innerHTML = "";
+  categoryStates.forEach(({ category, tagCount, selectedCount, active }) => {
+    const row = document.createElement("article");
+    row.className = `learning-category-row ${active ? "active" : ""}`;
+    const text = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = category.name;
+    const detail = document.createElement("span");
+    const roleLabel = category.learning_role === "stability" ? "신체 안정화" : "메인 화풍";
+    detail.textContent = tagCount ? `${roleLabel} · ${tagCount}개 중 ${selectedCount}개 사용` : `${roleLabel} · 등록된 태그 없음`;
+    text.append(name, detail);
+    const badge = document.createElement("span");
+    badge.className = "learning-category-badge";
+    badge.textContent = active ? "선택 보정" : tagCount ? "전체 포함" : "대기";
+    row.append(text, badge);
+    categoryList.appendChild(row);
+  });
+  list.innerHTML = "";
+  if (!summary.length) {
+    const empty = document.createElement("div");
+    empty.className = "learning-empty";
+    empty.textContent = "평가가 쌓이면 작가별 선호도와 생성 반영값이 여기에 표시됩니다.";
+    empty.textContent = "화풍 만족도 평가가 쌓이면 메인 화풍 작가의 선호 순위가 표시됩니다.";
+    list.appendChild(empty);
+  } else summary.slice(0, 12).forEach((item, index) => {
+    const signal = Number(item.preference_signal || 0);
+    const preference = artistPreferenceStatus(signal);
+    const row = document.createElement("article");
+    row.className = `learning-row ${preference.className}`;
+    row.style.setProperty("--preference-position", `${Math.max(0, Math.min(100, 50 + signal * 50))}%`);
+    const head = document.createElement("div");
+    head.className = "learning-row-head";
+    const rank = document.createElement("span");
+    rank.className = "learning-rank";
+    rank.textContent = `${index + 1}`;
+    const tag = document.createElement("strong");
+    tag.className = "learning-tag";
+    tag.textContent = item.tag;
+    const status = document.createElement("span");
+    status.className = "learning-preference-status";
+    status.textContent = preference.label;
+    head.append(rank, tag, status);
+    const metrics = document.createElement("div");
+    metrics.className = "learning-metrics";
+    const values = [
+      `보정 ★ ${Number(item.smoothed_rating || 3).toFixed(2)}`,
+      `원평균 ${Number(item.average_rating || 3).toFixed(2)}`,
+      `포함 ×${Number(item.selection_multiplier || 1).toFixed(2)}`,
+      preference.weight,
+      `평가 ${item.count}회`,
+    ];
+    values.forEach((value) => {
+      const metric = document.createElement("span");
+      metric.textContent = value;
+      metrics.appendChild(metric);
+    });
+    const meter = document.createElement("div");
+    meter.className = "learning-meter";
+    meter.title = "왼쪽은 낮은 선호, 가운데는 중립, 오른쪽은 높은 선호입니다.";
+    meter.innerHTML = "<span></span><i></i>";
+    row.append(head, metrics, meter);
+    list.appendChild(row);
+  });
+  stabilityList.innerHTML = "";
+  if (!stabilitySummary.length) {
+    const empty = document.createElement("div");
+    empty.className = "learning-empty";
+    empty.textContent = "신체 안정성 평가가 쌓이면 안정화 작가별 추천 가중치가 표시됩니다.";
+    stabilityList.appendChild(empty);
+  } else stabilitySummary.slice(0, 12).forEach((item, index) => {
+    const signal = Math.max(-1, Math.min(1, (Number(item.best_smoothed_rating || 3) - 3) / 2));
+    const preference = artistPreferenceStatus(signal);
+    const row = document.createElement("article");
+    row.className = `learning-row ${preference.className}`;
+    row.style.setProperty("--preference-position", `${Math.max(0, Math.min(100, 50 + signal * 50))}%`);
+    const head = document.createElement("div");
+    head.className = "learning-row-head";
+    const rank = document.createElement("span");
+    rank.className = "learning-rank";
+    rank.textContent = `${index + 1}`;
+    const tag = document.createElement("strong");
+    tag.className = "learning-tag";
+    tag.textContent = item.tag;
+    const status = document.createElement("span");
+    status.className = "learning-preference-status";
+    status.textContent = `추천 ${item.best_weight}`;
+    head.append(rank, tag, status);
+    const metrics = document.createElement("div");
+    metrics.className = "learning-metrics";
+    [
+      `추천 보정 ★ ${Number(item.best_smoothed_rating || 3).toFixed(2)}`,
+      `전체 평균 ${Number(item.average_rating || 3).toFixed(2)}`,
+      `시험 가중치 ${item.tested_weight_count}개`,
+      `총 평가 ${item.count}회`,
+    ].forEach((value) => {
+      const metric = document.createElement("span");
+      metric.textContent = value;
+      metrics.appendChild(metric);
+    });
+    const meter = document.createElement("div");
+    meter.className = "learning-meter";
+    meter.title = "추천 가중치의 보정된 신체 안정성 점수입니다.";
+    meter.innerHTML = "<span></span><i></i>";
+    row.append(head, metrics, meter);
+    stabilityList.appendChild(row);
+  });
+}
+
+async function resetArtistRatings() {
+  if (!window.confirm("모든 이미지 평점을 지우고 작가 선호도 학습을 초기화할까요?")) return;
+  const data = await request("/api/history/ratings/clear", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  state = data.state;
+  [modalItems, liveItems, battingLiveItems].forEach((items) => {
+    items.forEach((item) => {
+      delete item.rating;
+      delete item.style_rating;
+      delete item.stability_rating;
+    });
+  });
+  renderHistory();
+  renderCompare();
+  renderArtistLearning();
+  renderLiveGallery(liveItems, "#liveGallery");
+  renderLiveGallery(battingLiveItems, "#battingLiveGallery");
+  if (!$("#imageModal").hidden) closeImageModal();
+  showToast("모든 평점과 작가 학습을 초기화했습니다.", "success");
+}
+
 function renderPresets() {
+  ensureAutoPresetSets();
   state.generation.recent_base_presets = state.generation.recent_base_presets || [];
   state.generation.recent_character_presets = state.generation.recent_character_presets || [];
   const baseList = $("#baseList");
@@ -756,6 +1102,128 @@ function renderPresets() {
   $("#deleteBaseButton").disabled = state.base_presets.length <= 1;
   $("#deleteCharButton").disabled = state.character_presets.length <= 1;
   bindAutosaveInputs(editors);
+  renderPresetSetPanel();
+}
+
+function renderPresetSetPanel() {
+  const root = $("#presetSetList");
+  if (!root) return;
+  ensureAutoPresetSets();
+  root.innerHTML = "";
+  if (!state.preset_sets.length) {
+    root.innerHTML = `<div class="empty-box"><strong>아직 프리셋 세트가 없습니다.</strong><span>세트를 직접 추가하거나 두 프리셋의 이름을 같게 설정하세요.</span></div>`;
+    return;
+  }
+  state.preset_sets.forEach((presetSet, index) => {
+    const row = document.createElement("article");
+    row.className = "preset-set-row";
+    row.dataset.index = String(index);
+
+    const nameLabel = document.createElement("label");
+    const nameCaption = document.createElement("span");
+    nameCaption.textContent = "세트 이름";
+    const nameInput = document.createElement("input");
+    nameInput.value = presetSet.name;
+    nameInput.disabled = !!presetSet.auto;
+    nameLabel.append(nameCaption, nameInput);
+
+    const baseLabel = document.createElement("label");
+    const baseCaption = document.createElement("span");
+    baseCaption.textContent = "베이스 + 퀄리티";
+    const baseSelect = document.createElement("select");
+    fillSelect(baseSelect, state.base_presets, presetSet.base_preset);
+    baseSelect.disabled = !!presetSet.auto;
+    baseLabel.append(baseCaption, baseSelect);
+
+    const characterLabel = document.createElement("label");
+    const characterCaption = document.createElement("span");
+    characterCaption.textContent = "캐릭터";
+    const characterSelect = document.createElement("select");
+    fillSelect(characterSelect, state.character_presets, presetSet.character_preset);
+    characterSelect.disabled = !!presetSet.auto;
+    characterLabel.append(characterCaption, characterSelect);
+
+    const status = document.createElement("div");
+    status.className = `mode-status ${presetSet.auto ? "fixed" : ""}`;
+    status.textContent = presetSet.auto ? "이름 일치 자동" : "사용자 세트";
+
+    const deleteButton = document.createElement("button");
+    deleteButton.className = "icon-button";
+    deleteButton.type = "button";
+    deleteButton.title = presetSet.auto ? "동일 이름 프리셋에서 자동 생성된 세트입니다." : "세트 삭제";
+    deleteButton.textContent = "×";
+    deleteButton.disabled = !!presetSet.auto;
+
+    if (!presetSet.auto) {
+      nameInput.onchange = () => {
+        const oldName = presetSet.name;
+        const desired = nameInput.value.trim() || "이름 없는 세트";
+        const duplicate = state.preset_sets.some((item, itemIndex) => itemIndex !== index && item.name === desired);
+        presetSet.name = duplicate ? uniquePresetSetName(desired) : desired;
+        if (state.generation.preset_set === oldName) state.generation.preset_set = presetSet.name;
+        (state.batting_scenes || []).forEach((scene) => {
+          if (scene.preset_set === oldName) scene.preset_set = presetSet.name;
+        });
+        renderPresetSetPanel();
+        renderGenerate();
+        renderBatting();
+        scheduleSave();
+      };
+      const updateCombination = () => {
+        presetSet.base_preset = baseSelect.value;
+        presetSet.character_preset = characterSelect.value;
+        if (state.generation.preset_set === presetSet.name) applyGenerationPresetSet(presetSet.name);
+        (state.batting_scenes || []).forEach((scene) => {
+          if (scene.preset_set === presetSet.name) {
+            scene.base_preset = presetSet.base_preset;
+            scene.character_preset = presetSet.character_preset;
+          }
+        });
+        renderGenerate();
+        renderBatting();
+        scheduleSave();
+      };
+      baseSelect.onchange = updateCombination;
+      characterSelect.onchange = updateCombination;
+      deleteButton.onclick = () => deletePresetSet(index);
+    }
+
+    row.append(nameLabel, baseLabel, characterLabel, status, deleteButton);
+    root.appendChild(row);
+  });
+}
+
+function addPresetSet() {
+  syncEditorsToState();
+  const baseName = state.generation.base_preset || state.base_presets[0]?.name || "";
+  const characterName = state.generation.character_preset || state.character_presets[0]?.name || "";
+  state.preset_sets.push({
+    name: uniquePresetSetName("새 프리셋 세트"),
+    base_preset: baseName,
+    character_preset: characterName,
+    auto: false,
+  });
+  renderPresetSetPanel();
+  renderGenerate();
+  renderBatting();
+  scheduleSave();
+  showToast("프리셋 세트를 추가했습니다.", "success");
+}
+
+function deletePresetSet(index) {
+  const presetSet = state.preset_sets[index];
+  if (!presetSet || presetSet.auto) return;
+  if (!window.confirm(`'${presetSet.name}' 프리셋 세트를 삭제할까요?`)) return;
+  if (state.generation.preset_set === presetSet.name) state.generation.preset_set = "";
+  (state.batting_scenes || []).forEach((scene) => {
+    if (scene.preset_set === presetSet.name) scene.preset_set = "";
+  });
+  state.preset_sets.splice(index, 1);
+  renderPresetSetPanel();
+  renderGenerate();
+  renderBatting();
+  scheduleSave();
+  showToast("프리셋 세트를 삭제했습니다.", "success");
 }
 
 function selectCharacterSlot(index) {
@@ -842,10 +1310,85 @@ function renderArtistActionButton(item) {
 function enrichedImageItem(item, context = {}) {
   return {
     ...item,
+    rating_disabled: Boolean(item.rating_disabled || context.history?.type === "batting_test"),
+    history_id: item.history_id || context.history?.id || "",
     source_base_preset: item.source_base_preset || context.history?.base_preset || "",
     source_character_preset: item.source_character_preset || context.history?.character_preset || "",
     source_label: item.scene_name ? `${context.label || item.source_label || ""} · ${item.scene_name}` : context.label || item.source_label || "",
   };
+}
+
+function sameHistoryImage(left, right) {
+  return Boolean(
+    left?.history_id &&
+    right?.history_id &&
+    left.history_id === right.history_id &&
+    left.path &&
+    right.path &&
+    left.path === right.path
+  );
+}
+
+const ratingAxes = [
+  { key: "style", field: "style_rating", shortLabel: "화풍", label: "화풍 만족도", help: "메인 화풍 작가의 선택 확률과 가중치 방향에 반영됩니다." },
+  { key: "stability", field: "stability_rating", shortLabel: "신체", label: "신체 안정성", help: "인체·손발의 자연스러움과 메인 화풍 보존을 함께 평가합니다." },
+];
+
+function itemRating(item, axis) {
+  if (axis.key === "style" && item[axis.field] == null && item.rating != null) return Number(item.rating || 0);
+  return Number(item[axis.field] || 0);
+}
+
+function setLocalItemRating(item, ratingType, rating) {
+  const axis = ratingAxes.find((entry) => entry.key === ratingType);
+  if (!axis) return;
+  if (rating) item[axis.field] = rating;
+  else delete item[axis.field];
+  if (ratingType === "style") delete item.rating;
+}
+
+function renderRatingAxis(item, axis, compact = false) {
+  const row = document.createElement("div");
+  row.className = `rating-axis-row ${compact ? "compact" : ""}`;
+  const copy = document.createElement("div");
+  copy.className = "rating-axis-copy";
+  const label = document.createElement("span");
+  label.textContent = compact ? axis.shortLabel : axis.label;
+  copy.appendChild(label);
+  if (!compact) {
+    const help = document.createElement("small");
+    help.textContent = axis.help;
+    copy.appendChild(help);
+  }
+  row.appendChild(copy);
+  const stars = document.createElement("div");
+  stars.className = "rating-stars";
+  const currentRating = itemRating(item, axis);
+  for (let rating = 1; rating <= 5; rating += 1) {
+    const button = document.createElement("button");
+    button.className = `${compact ? "card-rating-button" : "rating-button"} ${rating <= currentRating ? "active" : ""}`;
+    button.type = "button";
+    button.textContent = "★";
+    button.title = currentRating === rating ? `${axis.label} ${rating}점 지우기` : `${axis.label} ${rating}점`;
+    button.setAttribute("aria-label", button.title);
+    button.setAttribute("aria-pressed", rating === currentRating ? "true" : "false");
+    button.onclick = async (event) => {
+      event.stopPropagation();
+      await rateImage(item, axis.key, currentRating === rating ? 0 : rating);
+    };
+    stars.appendChild(button);
+  }
+  row.appendChild(stars);
+  return row;
+}
+
+function renderCardRating(item) {
+  if (item.rating_disabled || !item.history_id || !item.path || item.error) return null;
+  const root = document.createElement("div");
+  root.className = "card-rating-control";
+  root.setAttribute("aria-label", "이미지 평가");
+  ratingAxes.forEach((axis) => root.appendChild(renderRatingAxis(item, axis, true)));
+  return root;
 }
 
 function renderImageCard(item, context = {}) {
@@ -865,6 +1408,17 @@ function renderImageCard(item, context = {}) {
   const labelNode = document.createElement("span");
   labelNode.textContent = item.error ? item.error : item.created_at || "생성 완료";
   meta.appendChild(labelNode);
+  if (!context.inlineRating && !enriched.rating_disabled) {
+    const ratingValues = ratingAxes
+      .map((axis) => [axis.shortLabel, itemRating(enriched, axis)])
+      .filter(([, rating]) => rating >= 1);
+    if (ratingValues.length) {
+      const rating = document.createElement("span");
+      rating.className = "rating-badge";
+      rating.textContent = ratingValues.map(([label, value]) => `${label} ★${value}`).join(" · ");
+      meta.appendChild(rating);
+    }
+  }
   if (canReuseArtists(item)) {
     const button = document.createElement("button");
     button.className = "mini-button artist-reuse-button";
@@ -876,12 +1430,17 @@ function renderImageCard(item, context = {}) {
     };
     meta.appendChild(button);
   }
+  if (context.inlineRating) {
+    const ratingControl = renderCardRating(enriched);
+    if (ratingControl) meta.appendChild(ratingControl);
+  }
   card.appendChild(meta);
   return card;
 }
 
 function renderLiveGallery(items = liveItems, rootSelector = "#liveGallery") {
   if (rootSelector === "#liveGallery") liveItems = items || [];
+  if (rootSelector === "#battingLiveGallery") battingLiveItems = items || [];
   const root = $(rootSelector);
   if (!root) return;
   root.innerHTML = "";
@@ -891,8 +1450,9 @@ function renderLiveGallery(items = liveItems, rootSelector = "#liveGallery") {
     return;
   }
   const modalItems = galleryItems.filter((item) => item.image_url);
+  const inlineRating = rootSelector === "#liveGallery";
   for (const item of galleryItems) {
-    root.appendChild(renderImageCard(item, { modalItems }));
+    root.appendChild(renderImageCard(item, { modalItems, inlineRating }));
   }
 }
 
@@ -1001,6 +1561,8 @@ function compareItems() {
       ...item,
       compare_label: `${history.created_at || ""} #${index + 1}${item.scene_name ? ` · ${item.scene_name}` : ""}`,
       compare_history: `${history.base_preset || ""} + ${history.character_preset || ""}`,
+      history_id: history.id || "",
+      rating_disabled: Boolean(item.rating_disabled || history.type === "batting_test"),
       source_base_preset: item.source_base_preset || history.base_preset || "",
       source_character_preset: item.source_character_preset || history.character_preset || "",
       source_label: `${history.created_at || ""} #${index + 1}${item.scene_name ? ` · ${item.scene_name}` : ""}`,
@@ -1187,6 +1749,54 @@ function renderImageModalItem(item) {
   artistList.innerHTML = "";
   for (const row of artistWeightRows(item.artists || [])) artistList.appendChild(row);
   $("#modalGenerateButton").disabled = !canReuseArtists(item);
+  renderModalRating(item);
+}
+
+function renderModalRating(item) {
+  const root = $("#modalRating");
+  if (!root) return;
+  root.innerHTML = "";
+  if (item.rating_disabled) {
+    const message = document.createElement("span");
+    message.className = "field-help";
+    message.textContent = "타율 테스트는 고정 조합 검증용이므로 작가 학습 평점에서 제외됩니다.";
+    root.appendChild(message);
+    return;
+  }
+  if (!item.history_id || !item.path) {
+    const message = document.createElement("span");
+    message.className = "field-help";
+    message.textContent = "생성 작업이 히스토리에 저장된 뒤 평점을 매길 수 있습니다.";
+    root.appendChild(message);
+    return;
+  }
+  ratingAxes.forEach((axis) => root.appendChild(renderRatingAxis(item, axis)));
+}
+
+async function rateImage(item, ratingType, rating) {
+  if (item.rating_disabled) return;
+  const data = await request("/api/history/rate", {
+    method: "POST",
+    body: JSON.stringify({ history_id: item.history_id, path: item.path, rating_type: ratingType, rating }),
+  });
+  state = data.state;
+  [modalItems, liveItems, battingLiveItems].forEach((items) => {
+    items.forEach((entry) => {
+      if (sameHistoryImage(entry, item)) setLocalItemRating(entry, ratingType, rating);
+    });
+  });
+  setLocalItemRating(item, ratingType, rating);
+  renderHistory();
+  renderCompare();
+  renderArtistLearning();
+  renderLiveGallery(liveItems, "#liveGallery");
+  renderLiveGallery(battingLiveItems, "#battingLiveGallery");
+  if (!$("#imageModal").hidden && modalItem && sameHistoryImage(modalItem, item)) {
+    setLocalItemRating(modalItem, ratingType, rating);
+    renderModalRating(modalItem);
+  }
+  const axis = ratingAxes.find((entry) => entry.key === ratingType);
+  showToast(rating ? `${axis?.label || "평점"}: ${rating}점으로 평가했습니다.` : `${axis?.label || "평점"}을 지웠습니다.`, "success");
 }
 
 function applyModalTransform() {
@@ -1323,12 +1933,17 @@ function generateFromImage(item) {
   closeImageModal();
   state.generation.fixed_artists = item.artists.map((artist) => ({
     category: artist.category || "fixed",
+    learning_role: artist.learning_role || (String(artist.category || "").includes("안정") ? "stability" : "style"),
     tag: artist.tag || "",
     weight: Number(artist.weight ?? 1),
     prompt: artist.prompt || "",
   })).filter((artist) => artist.tag);
   if (item.source_base_preset) state.generation.base_preset = item.source_base_preset;
   if (item.source_character_preset) state.generation.character_preset = item.source_character_preset;
+  state.generation.preset_set = matchingPresetSetName(
+    state.generation.base_preset,
+    state.generation.character_preset
+  );
   renderGenerate();
   renderBatting();
   switchTab("generate");
@@ -1353,6 +1968,10 @@ function addBattingScene() {
   const nextIndex = state.batting_scenes.length + 1;
   state.batting_scenes.push({
     name: uniqueName(state.batting_scenes, `Scene ${nextIndex}`),
+    preset_set: state.generation.preset_set || matchingPresetSetName(
+      state.generation.base_preset,
+      state.generation.character_preset
+    ),
     base_preset: state.generation.base_preset || state.base_presets[0]?.name || "",
     character_preset: state.generation.character_preset || state.character_presets[0]?.name || "",
     image_size: normalizeImageSizeKey(state.generation.image_size || "portrait"),
@@ -1832,7 +2451,7 @@ function showWorldcupWinner(winner) {
 
 function addCategory() {
   syncEditorsToState();
-  state.categories.push({ name: uniqueName(state.categories, "새 카테고리"), tags: [], min_weight: 0.5, max_weight: 1.2, granule: 0.1, picks: 0 });
+  state.categories.push({ name: uniqueName(state.categories, "새 카테고리"), tags: [], min_weight: 0.5, max_weight: 1.2, granule: 0.1, picks: 0, learning_role: "style" });
   categoryIndex = state.categories.length - 1;
   renderArtists();
   scheduleSave();
@@ -1929,18 +2548,34 @@ function bindAutosaveInputs(root = document) {
     node.oninput = () => {
       syncEditorsToState();
       if (node.id === "catTags") renderRecognizedTags();
-      if (["catTags", "catMin", "catMax", "catGranule", "catPicks"].includes(node.id)) renderCategoryWeightPreview();
+      if (["catTags", "catMin", "catMax", "catGranule", "catPicks", "catLearningRole"].includes(node.id)) renderCategoryWeightPreview();
       if (node.id === "countInput") updateJobActionButtons();
       if (["catTags", "baseName", "charName"].includes(node.id)) {
         renderSetupGuide();
         updateJobActionButtons();
       }
+      if (["baseName", "charName"].includes(node.id)) {
+        renderPresetSetPanel();
+        fillPresetSetSelect($("#presetSetSelect"), state.generation.preset_set);
+      }
       scheduleSave();
     };
     node.onchange = () => {
       syncEditorsToState();
+      if (node.id === "catLearningRole") {
+        renderCategoryWeightPreview();
+        renderArtistLearning();
+      }
+      if (node.id === "presetSetSelect") {
+        applyGenerationPresetSet(node.value);
+        renderGenerate();
+        scheduleSave();
+        previewPrompt();
+        return;
+      }
       if (node.id === "baseSelect") rememberPreset("base", state.generation.base_preset);
       if (node.id === "charSelect") rememberPreset("character", state.generation.character_preset);
+      if (node.id === "baseSelect" || node.id === "charSelect") updateGenerationPresetSetFromPair();
       scheduleSave();
       if (node.id === "mockMode") {
         renderSettings();
@@ -1970,13 +2605,23 @@ async function loadState() {
   const data = await request("/api/state");
   state = data.state;
   state.quality_override_prompt = state.quality_override_prompt || "";
+  state.preset_sets = state.preset_sets || [];
+  state.artist_rating_summary = state.artist_rating_summary || [];
+  state.stability_rating_summary = state.stability_rating_summary || [];
+  state.categories = (state.categories || []).map((category) => ({
+    ...category,
+    learning_role: category.learning_role === "stability" || (!category.learning_role && String(category.name || "").includes("안정")) ? "stability" : "style",
+  }));
   state.batting_scenes = state.batting_scenes || [];
   state.generation = state.generation || {};
   state.generation.image_size = normalizeImageSizeKey(state.generation.image_size || "portrait");
   state.batting_scenes = state.batting_scenes.map((scene) => ({
     ...scene,
+    preset_set: scene.preset_set || "",
     image_size: normalizeImageSizeKey(scene.image_size || state.generation.image_size),
   }));
+  state.generation.preset_set = state.generation.preset_set || "";
+  ensureAutoPresetSets();
   selectedHistoryIds = new Set(Array.from(selectedHistoryIds).filter((id) => state.history.some((item) => item.id === id)));
   categoryIndex = Math.min(categoryIndex, Math.max(0, state.categories.length - 1));
   baseIndex = Math.min(baseIndex, Math.max(0, state.base_presets.length - 1));
@@ -2015,6 +2660,8 @@ function bindEvents() {
   $("#deleteBaseButton").onclick = deleteBase;
   $("#addCharButton").onclick = addChar;
   $("#deleteCharButton").onclick = deleteChar;
+  $("#addPresetSetButton").onclick = addPresetSet;
+  $("#resetArtistRatingsButton").onclick = resetArtistRatings;
   $("#saveSettingsButton").onclick = saveNow;
   $("#startWorldcupButton").onclick = startWorldcup;
   $("#selectAllHistoryButton").onclick = selectAllHistory;

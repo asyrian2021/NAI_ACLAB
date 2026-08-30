@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
-import random
 import secrets
 import shutil
 import subprocess
@@ -26,8 +25,10 @@ from app import (
     CharacterPreset,
     GenerationSettings,
     NovelAIClient,
+    PresetSet,
     PromptPreset,
-    float_range,
+    artist_rating_summary,
+    artist_tags_for_prompt,
     has_saved_api_token,
     load_api_token,
     load_state,
@@ -39,7 +40,8 @@ from app import (
     save_state,
     sanitize_history_entry,
     sanitize_history_item,
-    weight_tag,
+    stability_rating_summary,
+    sync_auto_preset_sets,
 )
 
 
@@ -72,17 +74,19 @@ def state_from_dict(data: dict) -> AppState:
             else next((item for item in base_data if item.get("quality_override_prompt")), None)
         )
         quality_override = (fallback_base or {}).get("quality_override_prompt", "")
-    return AppState(
+    state = AppState(
         categories=[dataclass_from_dict(Category, item) for item in data.get("categories", [])],
         base_presets=[dataclass_from_dict(PromptPreset, item) for item in base_data],
         character_presets=[dataclass_from_dict(CharacterPreset, item) for item in data.get("character_presets", [])],
+        preset_sets=[dataclass_from_dict(PresetSet, item) for item in data.get("preset_sets", [])],
         quality_override_prompt=quality_override,
         negative_prompt=data.get("negative_prompt", ""),
         api=dataclass_from_dict(ApiSettings, data.get("api", {})),
         generation=dataclass_from_dict(GenerationSettings, data.get("generation", {})),
         batting_scenes=[dataclass_from_dict(BattingScene, item) for item in data.get("batting_scenes", [])],
-        history=data.get("history", []),
+        history=[sanitize_history_entry(item) for item in data.get("history", [])],
     )
+    return sync_auto_preset_sets(state)
 
 
 def media_url(path: str) -> str:
@@ -135,6 +139,7 @@ def open_in_file_manager(path: Path) -> None:
 
 
 def state_payload(state: AppState) -> dict:
+    sync_auto_preset_sets(state)
     data = asdict(state)
     data.setdefault("api", {})["token"] = ""
     data["api"]["token_saved"] = has_saved_api_token()
@@ -144,6 +149,14 @@ def state_payload(state: AppState) -> dict:
     for history in data.get("history", []):
         for item in history.get("items", []):
             item["image_url"] = media_url(item.get("path", ""))
+    data["artist_rating_summary"] = sorted(
+        artist_rating_summary(state.history).values(),
+        key=lambda item: (-item["smoothed_rating"], -item["count"], item["tag"].casefold()),
+    )
+    data["stability_rating_summary"] = sorted(
+        stability_rating_summary(state.history).values(),
+        key=lambda item: (-item["best_smoothed_rating"], -item["count"], item["tag"].casefold()),
+    )
     return data
 
 
@@ -167,52 +180,10 @@ def selected_character(state: AppState) -> CharacterPreset | None:
     )
 
 
-def random_artist_tags(state: AppState) -> list[dict]:
-    result = []
-    for category in state.categories:
-        tags = parse_artist_tags(category.tags)
-        if not tags:
-            continue
-        weights = float_range(category.min_weight, category.max_weight, category.granule)
-        pick_count = len(tags) if category.picks <= 0 else min(category.picks, len(tags))
-        for tag in random.sample(tags, pick_count):
-            weight = random.choice(weights) if weights else category.min_weight
-            result.append(
-                {
-                    "category": category.name,
-                    "tag": tag,
-                    "weight": weight,
-                    "prompt": weight_tag(tag, weight),
-                }
-            )
-    return result
-
-
-def fixed_artist_tags(state: AppState) -> list[dict]:
-    result = []
-    for item in getattr(state.generation, "fixed_artists", []) or []:
-        tag = str(item.get("tag", "")).strip()
-        if not tag:
-            continue
-        try:
-            weight = float(item.get("weight", 1.0))
-        except (TypeError, ValueError):
-            weight = 1.0
-        result.append(
-            {
-                "category": item.get("category", "fixed"),
-                "tag": tag,
-                "weight": weight,
-                "prompt": item.get("prompt") or weight_tag(tag, weight),
-            }
-        )
-    return result
-
-
 def build_prompt(state: AppState) -> tuple[str, str, list[dict]]:
     base = selected_base(state)
     character = selected_character(state)
-    artists = fixed_artist_tags(state) or random_artist_tags(state)
+    artists = artist_tags_for_prompt(state)
     base_chunks = []
     if base and base.prompt.strip():
         base_chunks.append(base.prompt.strip())
@@ -283,6 +254,51 @@ def history_by_id(history_id: str) -> dict | None:
     return next((item for item in state.history if item.get("id") == history_id), None)
 
 
+def set_history_item_rating(history_id: str, item_path: str, rating_type: str, rating: int) -> AppState:
+    if rating < 0 or rating > 5:
+        raise ValueError("평점은 1점부터 5점 사이여야 합니다.")
+    rating_fields = {"style": "style_rating", "stability": "stability_rating"}
+    rating_field = rating_fields.get(rating_type)
+    if not rating_field:
+        raise ValueError("알 수 없는 평점 종류입니다.")
+    normalized_path = output_ref(item_path)
+    with STATE_LOCK:
+        state = load_state()
+        history = next((item for item in state.history if item.get("id") == history_id), None)
+        if not history:
+            raise LookupError("히스토리를 찾을 수 없습니다.")
+        if history.get("type") == "batting_test":
+            raise ValueError("타율 테스트 결과는 작가 학습 평점에서 제외됩니다.")
+        item = next(
+            (
+                candidate
+                for candidate in history.get("items", [])
+                if output_ref(candidate.get("path", "")) == normalized_path
+            ),
+            None,
+        )
+        if not item:
+            raise LookupError("이미지를 찾을 수 없습니다.")
+        if rating == 0:
+            item.pop(rating_field, None)
+        else:
+            item[rating_field] = rating
+        save_state(state)
+    return load_state()
+
+
+def clear_history_ratings() -> AppState:
+    with STATE_LOCK:
+        state = load_state()
+        for history in state.history:
+            for item in history.get("items", []) or []:
+                item.pop("rating", None)
+                item.pop("style_rating", None)
+                item.pop("stability_rating", None)
+        save_state(state)
+    return load_state()
+
+
 def clear_history(delete_files: bool) -> AppState:
     with STATE_LOCK:
         state = load_state()
@@ -345,13 +361,21 @@ def run_generation(job_id: str, state: AppState) -> None:
             latest.history.insert(0, history)
             save_state(latest)
         update["history"] = history
+        update["items"] = [item_payload({**item, "history_id": history["id"]}) for item in items]
     JOBS[job_id].update(update)
 
 
 def scene_state(state: AppState, scene: BattingScene) -> AppState:
     request_state = deepcopy(state)
-    request_state.generation.base_preset = scene.base_preset
-    request_state.generation.character_preset = scene.character_preset
+    base_preset = scene.base_preset
+    character_preset = scene.character_preset
+    if scene.preset_set:
+        preset_set = next((item for item in request_state.preset_sets if item.name == scene.preset_set), None)
+        if preset_set:
+            base_preset = preset_set.base_preset
+            character_preset = preset_set.character_preset
+    request_state.generation.base_preset = base_preset
+    request_state.generation.character_preset = character_preset
     image_size = scene.image_size if scene.image_size in IMAGE_SIZE_DIMENSIONS else request_state.generation.image_size
     if image_size in IMAGE_SIZE_DIMENSIONS:
         width, height = IMAGE_SIZE_DIMENSIONS[image_size]
@@ -428,6 +452,7 @@ def run_batting_test(job_id: str, state: AppState) -> None:
                 "width": current.api.width,
                 "height": current.api.height,
                 "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "rating_disabled": True,
             }
             try:
                 client.generate(prompt, negative, path)
@@ -461,6 +486,10 @@ def run_batting_test(job_id: str, state: AppState) -> None:
             latest.history.insert(0, history)
             save_state(latest)
         update["history"] = history
+        update["items"] = [
+            item_payload({**item, "history_id": history["id"], "rating_disabled": True})
+            for item in items
+        ]
     JOBS[job_id].update(update)
 
 
@@ -604,6 +633,25 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"state": state_payload(state)})
         elif route == "/api/history/clear":
             state = clear_history(bool(data.get("delete_files", False)))
+            self.send_json({"state": state_payload(state)})
+        elif route == "/api/history/rate":
+            try:
+                rating = int(data.get("rating", 0))
+                state = set_history_item_rating(
+                    str(data.get("history_id", "")),
+                    str(data.get("path", "")),
+                    str(data.get("rating_type", "style")),
+                    rating,
+                )
+            except (TypeError, ValueError) as exc:
+                self.send_json({"error": str(exc)}, status=400)
+                return
+            except LookupError as exc:
+                self.send_json({"error": str(exc)}, status=404)
+                return
+            self.send_json({"state": state_payload(state)})
+        elif route == "/api/history/ratings/clear":
+            state = clear_history_ratings()
             self.send_json({"state": state_payload(state)})
         elif route == "/api/history/open":
             history = history_by_id(str(data.get("id", "")))
