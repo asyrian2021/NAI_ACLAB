@@ -31,6 +31,9 @@ let modalDragging = false;
 let modalDragStart = { x: 0, y: 0, panX: 0, panY: 0 };
 let presetPickerKind = null;
 let activeJobs = { generate: null, batting: null };
+let quotaData = null;
+let quotaRefreshInFlight = false;
+let quotaPollingStarted = false;
 const pendingJobId = "__pending__";
 
 const pageCopy = {
@@ -146,6 +149,96 @@ function setSaveState(text, tone = "success") {
   root.dataset.tone = tone;
 }
 
+function formatQuotaDuration(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value < 0) return "";
+  // Older responses used milliseconds while the current API uses seconds.
+  const normalized = value > 100000 ? value / 1000 : value;
+  const minutes = Math.max(1, Math.ceil(normalized / 60));
+  if (minutes < 60) return `${minutes}분`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder ? `${hours}시간 ${remainder}분` : `${hours}시간`;
+}
+
+function renderQuota() {
+  const root = $("#quotaWidgetContent");
+  if (!root) return;
+  root.innerHTML = "";
+  root.classList.remove("exhausted");
+  if (!quotaData?.available) {
+    root.textContent = quotaData?.reason || "API 토큰을 입력하면 할당량을 확인합니다.";
+    return;
+  }
+  const tierNames = ["Paper", "Tablet", "Scroll", "Opus"];
+  const percent = Number(quotaData.v5_percent);
+  const hasV5Quota = Number.isFinite(percent);
+  const isExhausted = Boolean(quotaData.v5_is_negative) || (hasV5Quota && percent <= 0);
+  const displayedPercent = hasV5Quota ? Math.max(0, percent) : null;
+  const barPercent = displayedPercent === null ? 0 : Math.min(100, displayedPercent);
+
+  const summary = document.createElement("div");
+  summary.className = "quota-summary";
+  const title = document.createElement("span");
+  title.textContent = hasV5Quota ? "V5 사용 한도" : "이미지 Anlas";
+  const value = document.createElement("strong");
+  value.textContent = hasV5Quota
+    ? (isExhausted ? "소진" : `${displayedPercent.toFixed(displayedPercent % 1 ? 1 : 0)}%`)
+    : `${Number(quotaData.total_anlas || 0).toLocaleString()}`;
+  summary.append(title, value);
+  root.appendChild(summary);
+
+  if (hasV5Quota) {
+    const bar = document.createElement("div");
+    bar.className = "quota-bar";
+    const fill = document.createElement("span");
+    fill.style.width = `${barPercent}%`;
+    bar.appendChild(fill);
+    root.appendChild(bar);
+  }
+
+  const details = document.createElement("div");
+  details.className = "quota-detail";
+  const tier = tierNames[Number(quotaData.tier)] || "NovelAI";
+  const anlas = `Anlas ${Number(quotaData.total_anlas || 0).toLocaleString()}`;
+  const recovery = formatQuotaDuration(quotaData.v5_next_percent_seconds);
+  details.textContent = hasV5Quota
+    ? `${tier} · ${anlas}${recovery ? ` · 다음 +1% ${recovery}` : ""}`
+    : `${tier} · ${anlas}`;
+  root.appendChild(details);
+  const updated = document.createElement("div");
+  updated.className = "quota-updated";
+  updated.textContent = "방금 갱신됨";
+  root.appendChild(updated);
+  root.classList.toggle("exhausted", isExhausted);
+}
+
+async function refreshQuota({ silent = false } = {}) {
+  if (quotaRefreshInFlight) return;
+  quotaRefreshInFlight = true;
+  const button = $("#quotaRefreshButton");
+  if (button) button.disabled = true;
+  try {
+    const data = await request("/api/quota");
+    quotaData = data.quota || null;
+    renderQuota();
+    if (!silent && quotaData?.available) showToast("NAI 할당량을 갱신했습니다.", "success");
+  } catch (error) {
+    quotaData = { available: false, reason: "할당량 정보를 불러오지 못했습니다." };
+    renderQuota();
+    if (!silent) showToast(`할당량을 갱신하지 못했습니다: ${error.message}`, "error");
+  } finally {
+    quotaRefreshInFlight = false;
+    if (button) button.disabled = false;
+  }
+}
+
+function startQuotaPolling() {
+  if (quotaPollingStarted) return;
+  quotaPollingStarted = true;
+  setInterval(() => refreshQuota({ silent: true }), 60_000);
+}
+
 function showToast(message, tone = "info") {
   const region = $("#toastRegion");
   if (!region) return;
@@ -208,7 +301,10 @@ async function saveNow() {
       renderGenerate();
     }
     setSaveState(hadPendingToken ? "API 토큰 변경 저장됨" : "자동 저장됨", "success");
-    if (hadPendingToken) showToast("새 API 토큰으로 교체했습니다.", "success");
+    if (hadPendingToken) {
+      showToast("새 API 토큰으로 교체했습니다.", "success");
+      await refreshQuota({ silent: true });
+    }
   } catch (error) {
     setSaveState("저장 실패", "error");
     showToast(`저장하지 못했습니다: ${error.message}`, "error");
@@ -2632,6 +2728,8 @@ async function loadState() {
   switchTab(currentTab);
   updateJobActionButtons();
   await previewPrompt();
+  await refreshQuota({ silent: true });
+  startQuotaPolling();
 }
 
 function bindEvents() {
@@ -2641,6 +2739,7 @@ function bindEvents() {
     await loadState();
     showToast("저장된 내용을 다시 불러왔습니다.", "success");
   };
+  $("#quotaRefreshButton").onclick = () => refreshQuota();
   $("#previewButton").onclick = previewPrompt;
   $("#generateButtonInline").onclick = startGeneration;
   $("#stopGenerateButton").onclick = stopGeneration;

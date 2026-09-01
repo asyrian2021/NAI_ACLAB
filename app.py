@@ -850,6 +850,69 @@ class NovelAIClient:
             else:
                 raise RuntimeError(f"알 수 없는 API 응답 형식: {maybe_json[:300]}")
 
+    def subscription_quota(self) -> dict:
+        """Return a safe, UI-ready subset of the NovelAI subscription response."""
+        if self.settings.mock_mode:
+            return {"available": False, "reason": "체험 모드에서는 할당량을 확인할 수 없습니다."}
+        token = self.settings.token.strip()
+        if not token:
+            return {"available": False, "reason": "API 토큰을 입력하면 할당량을 확인합니다."}
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "User-Agent": self.settings.user_agent.strip() or DEFAULT_USER_AGENT,
+            "Accept": "application/json",
+            "Origin": "https://novelai.net",
+            "Referer": "https://novelai.net/",
+        }
+        errors: list[str] = []
+        # Subscription requests never follow a user-configured image endpoint.
+        # The token is sent only to NovelAI's official hosts.
+        for endpoint in (
+            "https://image.novelai.net/user/subscription",
+            "https://api.novelai.net/user/subscription",
+        ):
+            request = urllib.request.Request(endpoint, headers=headers, method="GET")
+            try:
+                with urllib.request.urlopen(request, timeout=20) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+                break
+            except urllib.error.HTTPError as exc:
+                errors.append(str(exc.code))
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+                errors.append(type(exc).__name__)
+        else:
+            status = errors[-1] if errors else "unknown"
+            return {"available": False, "reason": f"할당량 정보를 불러오지 못했습니다. ({status})"}
+
+        steps = data.get("trainingStepsLeft") or {}
+        fixed_anlas = int(steps.get("fixedTrainingStepsLeft") or 0)
+        purchased_anlas = int(steps.get("purchasedTrainingSteps") or 0)
+        usage = data.get("usage") or data.get("imageGenerationUsage") or {}
+        if not isinstance(usage, dict):
+            usage = {}
+        percent = usage.get("percent")
+        try:
+            percent = float(percent) if percent is not None else None
+        except (TypeError, ValueError):
+            percent = None
+        next_percent = usage.get("timeUntilNextPercent")
+        try:
+            next_percent = float(next_percent) if next_percent is not None else None
+        except (TypeError, ValueError):
+            next_percent = None
+        return {
+            "available": True,
+            "tier": int(data.get("tier") or 0),
+            "active": bool(data.get("active")),
+            "subscription_anlas": fixed_anlas,
+            "paid_anlas": purchased_anlas,
+            "total_anlas": fixed_anlas + purchased_anlas,
+            "v5_percent": percent,
+            "v5_is_negative": bool(usage.get("isNegative")),
+            "v5_next_percent_seconds": next_percent,
+        }
+
 
 class ScrollFrame(ttk.Frame if ttk else object):
     def __init__(self, parent):

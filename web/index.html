@@ -26,6 +26,13 @@
           <button class="nav-item" data-tab="history">◈ 생성 기록</button>
         </nav>
         <div class="sidebar-tools">
+          <section class="quota-widget" id="quotaWidget" aria-live="polite">
+            <div class="quota-widget-header">
+              <span>NAI V5 할당량</span>
+              <button class="quota-refresh" id="quotaRefreshButton" type="button" title="할당량 새로고침" aria-label="할당량 새로고침">↻</button>
+            </div>
+            <div class="quota-widget-content" id="quotaWidgetContent">할당량을 확인하는 중입니다.</div>
+          </section>
           <button class="nav-item settings-nav-item" data-tab="settings">⚙ API 설정</button>
         </div>
         <div class="sidebar-footer">

@@ -565,6 +565,13 @@ class Handler(BaseHTTPRequestHandler):
             state = load_state()
             prompt, negative, artists = build_prompt(state)
             self.send_json({"prompt": prompt, "negative": negative, "artists": artists})
+        elif route == "/api/quota":
+            if not self.authorized_api_request():
+                self.send_error(403)
+                return
+            state = load_state()
+            state.api.token = load_api_token()
+            self.send_json({"quota": NovelAIClient(state.api).subscription_quota()})
         elif route == "/api/job":
             if not self.authorized_api_request():
                 self.send_error(403)

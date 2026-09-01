@@ -3,11 +3,13 @@ import unittest
 from unittest.mock import patch
 
 from app import (
+    ApiSettings,
     AppState,
     BattingScene,
     Category,
     CharacterPreset,
     GenerationSettings,
+    NovelAIClient,
     PresetSet,
     PromptPreset,
     artist_rating_summary,
@@ -98,6 +100,34 @@ class AdaptiveArtistTests(unittest.TestCase):
         summary = artist_rating_summary(history)
         self.assertNotIn("artist:fixed", summary)
         self.assertIn("artist:learned", summary)
+
+    def test_subscription_quota_returns_only_display_safe_values(self):
+        response = {
+            "tier": 3,
+            "active": True,
+            "paymentProcessorData": {"secret": "must-not-leak"},
+            "trainingStepsLeft": {"fixedTrainingStepsLeft": 850, "purchasedTrainingSteps": 120},
+            "usage": {"percent": 72.5, "isNegative": False, "timeUntilNextPercent": 1800},
+        }
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                import json
+
+                return json.dumps(response).encode("utf-8")
+
+        with patch("app.urllib.request.urlopen", return_value=FakeResponse()):
+            quota = NovelAIClient(ApiSettings(token="token-for-test", mock_mode=False)).subscription_quota()
+
+        self.assertEqual(quota["total_anlas"], 970)
+        self.assertEqual(quota["v5_percent"], 72.5)
+        self.assertNotIn("paymentProcessorData", quota)
 
     def test_style_and_stability_ratings_use_separate_artist_roles(self):
         history = [

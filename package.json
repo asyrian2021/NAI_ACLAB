@@ -1,6 +1,6 @@
 {
   "name": "nai-aclab",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Local web UI for experimenting with NovelAI artist tag weight combinations.",
   "license": "MIT",
   "type": "commonjs",
