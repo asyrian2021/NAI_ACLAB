@@ -354,6 +354,17 @@ class AppState:
     history: list[dict] = field(default_factory=list)
 
 
+def character_negative_prompt(common_prompt: str, character: CharacterPreset | None) -> str:
+    parts = [common_prompt.strip()]
+    if character:
+        for prompt, negative in zip(character.prompts, character.negatives):
+            if prompt.strip():
+                parts.append(negative.strip())
+    while len(parts) > 1 and not parts[-1]:
+        parts.pop()
+    return " | ".join(parts)
+
+
 def sync_auto_preset_sets(state: AppState) -> AppState:
     base_names = {item.name for item in state.base_presets if item.name.strip()}
     character_names = {item.name for item in state.character_presets if item.name.strip()}
@@ -1600,10 +1611,7 @@ class App(tk.Tk if tk else object):
             character_prompts = [p.strip() for p in char.prompts if p.strip()]
         prompt_parts = [base_prompt] if base_prompt else []
         prompt_parts.extend(character_prompts)
-        negative = [self.state_data.negative_prompt.strip()]
-        if char:
-            negative.extend(n.strip() for n in char.negatives if n.strip())
-        negative_prompt = ", ".join(n for n in negative if n)
+        negative_prompt = character_negative_prompt(self.state_data.negative_prompt, char)
         return " | ".join(prompt_parts), negative_prompt, artists
 
     def preview_prompt(self) -> None:

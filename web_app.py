@@ -29,6 +29,7 @@ from app import (
     PromptPreset,
     artist_rating_summary,
     artist_tags_for_prompt,
+    character_negative_prompt,
     has_saved_api_token,
     load_api_token,
     load_state,
@@ -180,10 +181,10 @@ def selected_character(state: AppState) -> CharacterPreset | None:
     )
 
 
-def build_prompt(state: AppState) -> tuple[str, str, list[dict]]:
+def build_prompt(state: AppState, artists_override: list[dict] | None = None) -> tuple[str, str, list[dict]]:
     base = selected_base(state)
     character = selected_character(state)
-    artists = artist_tags_for_prompt(state)
+    artists = artist_tags_for_prompt(state) if artists_override is None else artists_override
     base_chunks = []
     if base and base.prompt.strip():
         base_chunks.append(base.prompt.strip())
@@ -204,10 +205,7 @@ def build_prompt(state: AppState) -> tuple[str, str, list[dict]]:
     if character:
         prompt_parts.extend(prompt.strip() for prompt in character.prompts if prompt.strip())
 
-    negative = [state.negative_prompt.strip()]
-    if character:
-        negative.extend(item.strip() for item in character.negatives if item.strip())
-    negative_prompt = ", ".join(item for item in negative if item)
+    negative_prompt = character_negative_prompt(state.negative_prompt, character)
     return " | ".join(prompt_parts), negative_prompt, artists
 
 

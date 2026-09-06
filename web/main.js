@@ -1187,7 +1187,7 @@ function renderPresets() {
     box.className = "character-box";
     box.hidden = i !== charSlotIndex;
     box.innerHTML = `
-      <p class="character-slot-help">한 명의 캐릭터 프롬프트를 입력하세요. 비워둔 캐릭터는 최종 프롬프트에서 제외됩니다.</p>
+      <p class="character-slot-help">한 명의 캐릭터 프롬프트를 입력하세요. 비워둔 캐릭터는 최종 프롬프트에서 제외되며, 네거티브도 공통 UC와 <code>|</code>로 나뉘어 해당 캐릭터 구획에 조립됩니다.</p>
       <label class="text-label"><span>프롬프트</span><textarea id="charPrompt${i}" spellcheck="false"></textarea></label>
       <label class="text-label"><span>네거티브 프롬프트</span><textarea id="charNegative${i}" spellcheck="false"></textarea></label>
     `;

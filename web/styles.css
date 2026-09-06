@@ -507,6 +507,10 @@ p {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.category-editor-grid > label {
+  align-self: start;
+}
+
 .form-span-full {
   grid-column: 1 / -1;
 }
