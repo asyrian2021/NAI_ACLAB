@@ -61,17 +61,24 @@ class AdaptiveArtistTests(unittest.TestCase):
             sum(weights["artist:other"]) / len(weights["artist:other"]),
         )
 
-    def test_highest_weights_are_placed_at_both_ends(self):
+    def test_artist_order_is_random_regardless_of_weight(self):
         artists = [
             {"tag": "a", "weight": 1.4},
             {"tag": "b", "weight": 1.3},
             {"tag": "c", "weight": 1.2},
             {"tag": "d", "weight": 1.1},
         ]
-        with patch("app.random.getrandbits", return_value=1):
-            ordered = order_artist_tags(artists)
-        self.assertEqual(ordered[0]["tag"], "a")
-        self.assertEqual(ordered[-1]["tag"], "b")
+        original = [dict(item) for item in artists]
+        positions = {item["tag"]: set() for item in artists}
+        with patch("app.random.shuffle", side_effect=random.Random(17).shuffle):
+            for _ in range(40):
+                ordered = order_artist_tags(artists)
+                self.assertCountEqual(ordered, original)
+                for index, item in enumerate(ordered):
+                    positions[item["tag"]].add(index)
+        for tag_positions in positions.values():
+            self.assertEqual(tag_positions, {0, 1, 2, 3})
+        self.assertEqual(artists, original)
 
     def test_fixed_artist_order_is_preserved(self):
         state = AppState(

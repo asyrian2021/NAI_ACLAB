@@ -648,24 +648,9 @@ def fixed_artist_tags_for_state(state: AppState) -> list[dict]:
 
 
 def order_artist_tags(artists: list[dict]) -> list[dict]:
-    if len(artists) < 2:
-        return list(artists)
     shuffled = list(artists)
     random.shuffle(shuffled)
-    ranked = sorted(shuffled, key=lambda item: float(item.get("weight", 0.0)), reverse=True)
-    ordered: list[dict | None] = [None] * len(ranked)
-    left = 0
-    right = len(ranked) - 1
-    highest_at_front = bool(random.getrandbits(1))
-    for index, artist in enumerate(ranked):
-        place_front = highest_at_front if index % 2 == 0 else not highest_at_front
-        if place_front:
-            ordered[left] = artist
-            left += 1
-        else:
-            ordered[right] = artist
-            right -= 1
-    return [item for item in ordered if item is not None]
+    return shuffled
 
 
 def artist_tags_for_prompt(state: AppState) -> list[dict]:
