@@ -5,6 +5,7 @@ test("guidance sweep preserves the source and draws a labeled comparison grid", 
 }) => {
   await page.goto("/");
   await page
+    .getByRole("navigation", { name: "주 메뉴" })
     .getByRole("button", { name: "가이던스 테스트", exact: true })
     .waitFor();
   const buttons = await page.locator("header nav button").allTextContents();
@@ -32,6 +33,7 @@ test("guidance sweep preserves the source and draws a labeled comparison grid", 
       .evaluate((e) => getComputedStyle(e).flexDirection),
   ).toBe("row");
   await page
+    .getByRole("navigation", { name: "주 메뉴" })
     .getByRole("button", { name: "가이던스 테스트", exact: true })
     .click();
   await page
@@ -74,6 +76,7 @@ test("guidance sweep preserves the source and draws a labeled comparison grid", 
   await expect(page.locator(".save-status")).toHaveText("자동 저장됨");
   await page.reload();
   await page
+    .getByRole("navigation", { name: "주 메뉴" })
     .getByRole("button", { name: "가이던스 테스트", exact: true })
     .click();
   await expect(
@@ -292,6 +295,7 @@ test("guidance sweep preserves the source and draws a labeled comparison grid", 
   await expect(page.locator(".stage")).toHaveCount(0);
   await page.reload();
   await page
+    .getByRole("navigation", { name: "주 메뉴" })
     .getByRole("button", { name: "가이던스 테스트", exact: true })
     .click();
   await expect(page.locator(".sweep-cell img")).toHaveCount(6);
@@ -330,6 +334,7 @@ test("guidance sweep preserves the source and draws a labeled comparison grid", 
   );
   await page.reload();
   await page
+    .getByRole("navigation", { name: "주 메뉴" })
     .getByRole("button", { name: "가이던스 테스트", exact: true })
     .click();
   await page.getByRole("button", { name: "전체 화면", exact: true }).click();

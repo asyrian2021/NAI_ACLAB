@@ -127,6 +127,16 @@ function App() {
     [editPreset, setEditPreset] = useState(0),
     [queueOpen, setQueueOpen] = useState(false),
     [limit, setLimit] = useState(60);
+  const [queueRevision, setQueueRevision] = useState(0);
+  function showQueue() {
+    setQueueOpen(true);
+    setQueueRevision((v) => v + 1);
+  }
+  useEffect(() => {
+    if (!queueOpen) return;
+    const timer = setTimeout(() => setQueueOpen(false), 3000);
+    return () => clearTimeout(timer);
+  }, [queueOpen, queueRevision]);
   const [revision, setRevision] = useState(0);
   const [saveStatus, setSaveStatus] = useState("자동 저장됨");
   const saveChain = useRef<Promise<unknown>>(Promise.resolve());
@@ -196,15 +206,16 @@ function App() {
     }
     if (!wasRunning.current) return;
     wasRunning.current = false;
-    const failed = jobs.some((j) => j.status === "failed");
+    const failed = jobs.some(
+      (j) =>
+        batchIds.current.has(j.id) &&
+        (j.status === "failed" || (j.failures || 0) > 0),
+    );
     setMessage(
       failed
         ? "작업이 끝났습니다. 대기열에서 오류를 확인하세요."
         : "생성 작업이 끝났습니다.",
     );
-    if (failed) return;
-    const timer = setTimeout(() => setQueueOpen(false), 3000);
-    return () => clearTimeout(timer);
   }, [jobStatus]);
   useEffect(() => {
     if (current && (!selected || !all.some((i) => i.path === selected)))
@@ -345,7 +356,7 @@ function App() {
     batchIds.current.add(queued.job_id);
     batchRunning.current = true;
     wasRunning.current = true;
-    setQueueOpen(true);
+    showQueue();
     setMessage("생성 대기열에 추가했습니다.");
   }
   function select(image: ImageItem) {
@@ -489,6 +500,11 @@ function App() {
     );
   const preset = state.prompt_presets[editPreset];
   const pending = jobs.filter(active);
+  const recentJobs = jobs
+    .filter((job) => !active(job))
+    .slice(-5)
+    .reverse();
+  const queueJobs = [...pending, ...recentJobs];
   const field = (key: keyof ApiSettings, title: string, type = "number") => (
     <label key={key}>
       {title}
@@ -535,6 +551,49 @@ function App() {
         >
           시드 고정 해제
         </button>
+      )}
+      {current && (
+        <div className="seed-test-actions">
+          <button
+            className="outline full"
+            disabled={!current.artists?.length || !!current.error}
+            title={
+              !current.artists?.length
+                ? "작가 태그가 기록된 이미지를 선택하세요."
+                : "이 이미지의 작가 조합을 고정하고 타율 테스트로 이동"
+            }
+            onClick={() => {
+              reuse();
+              setTab("batting");
+            }}
+          >
+            <FlaskConical size={14} />
+            타율 테스트
+          </button>
+          <button
+            className="outline full"
+            disabled={
+              current.seed === undefined ||
+              current.prompt === undefined ||
+              current.negative_prompt === undefined ||
+              !current.width ||
+              !current.height ||
+              !!current.error
+            }
+            title="이 이미지를 선택하고 시드를 고정한 상태로 가이던스 테스트로 이동"
+            onClick={() => {
+              edit((s) => {
+                s.api.seed = current.seed!;
+                s.guidance_test.source_path = current.path;
+              });
+              setFocus(false);
+              setTab("guidance");
+            }}
+          >
+            <SlidersHorizontal size={14} />
+            가이던스 테스트
+          </button>
+        </div>
       )}
     </div>
   );
@@ -1904,40 +1963,39 @@ function App() {
               <X size={16} />
             </button>
           </div>
-          {jobs.length ? (
-            jobs
-              .slice()
-              .reverse()
-              .map((j) => (
-                <div className="job" key={j.id}>
-                  <div className="row spread">
-                    <span>
-                      {j.name}{" "}
-                      <small>{statusNames[j.status] || j.status}</small>
-                    </span>
-                    <span>
-                      {j.progress}/{j.total}{" "}
-                      {active(j) && (
-                        <button
-                          aria-label="작업 중지"
-                          onClick={() =>
-                            void task(async () => {
-                              await api("job/cancel", { job_id: j.id });
-                              setMessage(
-                                "현재 처리 중인 이미지가 끝나면 중지합니다.",
-                              );
-                            })
-                          }
-                        >
-                          <X size={14} />
-                        </button>
-                      )}
-                    </span>
-                  </div>
-                  <progress value={j.progress} max={j.total} />
-                  {j.last_error && <p className="error-text">{j.last_error}</p>}
+          <p className="micro">
+            진행·대기 작업과 최근 종료 작업 5개까지 표시합니다.
+          </p>
+          {queueJobs.length ? (
+            queueJobs.map((j) => (
+              <div className="job" key={j.id}>
+                <div className="row spread">
+                  <span>
+                    {j.name} <small>{statusNames[j.status] || j.status}</small>
+                  </span>
+                  <span>
+                    {j.progress}/{j.total}{" "}
+                    {active(j) && (
+                      <button
+                        aria-label="작업 중지"
+                        onClick={() =>
+                          void task(async () => {
+                            await api("job/cancel", { job_id: j.id });
+                            setMessage(
+                              "현재 처리 중인 이미지가 끝나면 중지합니다.",
+                            );
+                          })
+                        }
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </span>
                 </div>
-              ))
+                <progress value={j.progress} max={j.total} />
+                {j.last_error && <p className="error-text">{j.last_error}</p>}
+              </div>
+            ))
           ) : (
             <p className="muted">대기 중인 작업이 없습니다.</p>
           )}
@@ -1977,7 +2035,12 @@ function App() {
               />
             </div>
           </div>
-          <button onClick={() => setQueueOpen(!queueOpen)}>
+          <button
+            onClick={() => {
+              if (queueOpen) setQueueOpen(false);
+              else showQueue();
+            }}
+          >
             {pending.length > 0 ? (
               <LoaderCircle className="spin" size={13} />
             ) : (

@@ -28,6 +28,7 @@ LOCAL_API_TOKEN = secrets.token_urlsafe(32)
 STATE_LOCK = threading.RLock()
 JOBS_LOCK = threading.RLock()
 JOBS: dict[str, dict] = {}
+COMPLETED_JOB_LIMIT = 50
 WORK: Queue = Queue()
 WORKER = None
 IMAGE_SIZE_DIMENSIONS = {"portrait": (832, 1216), "landscape": (1216, 832), "square": (1024, 1024)}
@@ -109,9 +110,18 @@ def scene_state(state, scene):
     return current
 
 
+def prune_completed_jobs():
+    # Caller holds JOBS_LOCK. Active jobs are never discarded.
+    finished = [key for key, job in JOBS.items() if job['status'] not in {'queued', 'running', 'cancelling'}]
+    for key in finished[:-COMPLETED_JOB_LIMIT]:
+        del JOBS[key]
+
+
 def update_job(job_id, **changes):
     with JOBS_LOCK:
         JOBS[job_id].update(changes)
+        if changes.get('status') in {'done', 'failed', 'cancelled'}:
+            prune_completed_jobs()
 
 
 def cancelled(job_id):
@@ -277,7 +287,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"state": state_payload(load_state())})
         if route == '/api/jobs':
             with JOBS_LOCK:
-                return self.send_json({"jobs": list(JOBS.values())[-50:]})
+                return self.send_json({"jobs": list(JOBS.values())})
         if route == '/api/quota':
             with STATE_LOCK:
                 state = load_state()

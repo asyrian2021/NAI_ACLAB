@@ -151,6 +151,19 @@ class ServerTests(unittest.TestCase):
             with self.assertRaises(ValueError): axis_values(*values)
         with self.assertRaises(ValueError): grid_values(GuidanceTestSettings(x_min=0,x_max=100,x_step=1,y_step=.1))
 
+    def test_completed_job_retention_preserves_active_jobs_and_history(self):
+        with web.JOBS_LOCK:
+            web.JOBS['active-old'] = {'id':'active-old','status':'running','progress':0,'total':1}
+            for i in range(60):
+                web.JOBS[f'old-{i}'] = {'id':f'old-{i}','status':'done','progress':1,'total':1}
+            web.JOBS['finishing'] = {'id':'finishing','status':'running','progress':0,'total':1}
+        web.update_job('finishing',status='done',progress=1)
+        result = self.request('/api/jobs')['jobs']
+        self.assertEqual(sum(j['status']=='done' for j in result),50)
+        self.assertTrue(any(j['id']=='active-old' for j in result))
+        self.assertFalse(any(j['id']=='old-0' for j in result))
+        self.assertEqual(self.request('/api/state')['state']['history'],[])
+
     def test_media_traversal_is_rejected(self):
         self.assertIsNone(web.safe_child_path(web.OUTPUT_DIR,'../secret'))
         self.assertIsNone(web.safe_child_path(web.OUTPUT_DIR,'%2e%2e/secret'))

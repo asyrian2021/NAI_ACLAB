@@ -245,7 +245,10 @@ test("unified presets, global prompts, random generation, comparison and persist
     fullPage: true,
   });
   expect(errors).toEqual([]);
-  await page.getByRole("button", { name: "타율 테스트", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "주 메뉴" })
+    .getByRole("button", { name: "타율 테스트", exact: true })
+    .click();
   await page.getByRole("button", { name: "씬 추가", exact: true }).click();
   await expect(page.getByLabel("씬 이름")).toHaveCount(0);
   await expect(page.locator(".scene-editor select").first()).toHaveValue(

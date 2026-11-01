@@ -43,8 +43,11 @@ try {
  fs.mkdirSync('test-results',{recursive:true});
  await page.screenshot({path:'test-results/desktop-studio-controls.png'});
  if(await page.getByRole('button',{name:'대기열 닫기'}).count())await page.getByRole('button',{name:'대기열 닫기'}).click();
- await page.getByRole('button',{name:'가이던스 테스트',exact:true}).click();
- await page.getByRole('button',{name:'원본 이미지 1 선택',exact:true}).click();
+ await page.locator('.right-panel').getByRole('button',{name:'타율 테스트',exact:true}).click();
+ await expect(page.getByText('고정 조합 3명 사용',{exact:true})).toBeVisible();
+ await page.getByRole('navigation',{name:'주 메뉴'}).getByRole('button',{name:'작업실',exact:true}).click();
+ await page.locator('.right-panel').getByRole('button',{name:'가이던스 테스트',exact:true}).click();
+ await expect(page.getByRole('button',{name:'원본 이미지 1 선택',exact:true})).toHaveAttribute('aria-pressed','true');
  await page.getByLabel('X축 · Guidance 끝',{exact:true}).fill('5.1');
  await page.getByLabel('X축 · Guidance 시작',{exact:true}).fill('5');
  await page.getByLabel('X축 · Guidance 간격',{exact:true}).fill('0.1');
@@ -100,5 +103,5 @@ try {
  execFileSync('python',['scripts/close_test_window.py',String(child.pid)],{windowsHide:true});
  const exit=await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(()=>r('timeout'),10000))]);
  if(exit==='timeout')throw new Error('Desktop did not exit normally');
- console.log(JSON.stringify({webview2:'passed',native_drag_and_save:'passed',guidance_sweep:'passed',image_keyboard_navigation:'passed',updater_ipc:'passed',preset_screen:'passed',single_instance:'passed',window_close:'passed'}));
+ console.log(JSON.stringify({webview2:'passed',native_drag_and_save:'passed',guidance_sweep:'passed',studio_test_shortcuts:'passed',image_keyboard_navigation:'passed',updater_ipc:'passed',preset_screen:'passed',single_instance:'passed',window_close:'passed'}));
 }finally{if(browser)await browser.close();if(child.exitCode===null){try{execFileSync('python',['scripts/close_test_window.py',String(child.pid)],{windowsHide:true});}catch{}setTimeout(()=>{if(child.exitCode===null)child.kill()},5000);}}
