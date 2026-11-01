@@ -39,6 +39,9 @@ import type {
 } from "./types";
 import "./styles.css";
 import { GuidanceTest } from "./GuidanceTest";
+import { BattingResults } from "./BattingResults";
+import { SeedStatus } from "./SeedStatus";
+import { FixedSeedConfirm } from "./FixedSeedConfirm";
 import { Updater } from "./Updater";
 
 const sizes: Record<string, [number, number]> = {
@@ -123,6 +126,10 @@ function App() {
     [error, setError] = useState(""),
     [dirty, setDirty] = useState(false),
     [busy, setBusy] = useState(false);
+  const [battingRunId, setBattingRunId] = useState("");
+  const [confirmBattingSeed, setConfirmBattingSeed] = useState<number | null>(
+    null,
+  );
   const [preview, setPreview] = useState<Preview | null>(null),
     [editPreset, setEditPreset] = useState(0),
     [queueOpen, setQueueOpen] = useState(false),
@@ -356,6 +363,7 @@ function App() {
     batchIds.current.add(queued.job_id);
     batchRunning.current = true;
     wasRunning.current = true;
+    if (batting) setBattingRunId(queued.job_id);
     showQueue();
     setMessage("생성 대기열에 추가했습니다.");
   }
@@ -798,16 +806,19 @@ function App() {
                 >
                   프롬프트 미리보기
                 </button>
-                <button
-                  className="primary full generate"
-                  disabled={busy}
-                  onClick={() => void task(() => generate())}
-                >
-                  <Sparkles size={16} />
-                  {state.api.mock_mode
-                    ? "체험 이미지 생성"
-                    : "생성 대기열에 추가"}
-                </button>
+                <div className="generation-action studio-generation">
+                  <button
+                    className="primary full generate"
+                    disabled={busy}
+                    onClick={() => void task(() => generate())}
+                  >
+                    <Sparkles size={16} />
+                    {state.api.mock_mode
+                      ? "체험 이미지 생성"
+                      : "생성 대기열에 추가"}
+                  </button>
+                  <SeedStatus seed={state.api.seed} />
+                </div>
                 <p className="micro">
                   {state.api.mock_mode
                     ? "API를 사용하지 않는 체험 모드"
@@ -1754,92 +1765,122 @@ function App() {
                   <h1>여러 장면에서 비교하기</h1>
                   <p>불러온 고정 조합을 여러 프리셋에서 시험할 수 있습니다.</p>
                 </div>
-                <button
-                  className="outline"
-                  onClick={() =>
-                    edit((s) =>
-                      s.batting_scenes.push({
-                        name: "",
-                        preset: s.prompt_presets[0]?.name || "",
-                        image_size: "portrait",
-                        count: 2,
-                      }),
-                    )
-                  }
+              </div>
+              <div className="batting-layout">
+                <section
+                  className="batting-settings"
+                  aria-label="타율 테스트 설정"
                 >
-                  <Plus size={15} />씬 추가
-                </button>
-              </div>
-              <div className="notice">
-                {state.generation.fixed_artists.length
-                  ? `고정 조합 ${state.generation.fixed_artists.length}명 사용`
-                  : "랜덤 모드입니다. 동일 조합으로 비교하려면 작업실에서 이미지의 조합을 불러오세요."}
-              </div>
-              {state.batting_scenes.map((sc, i) => (
-                <section className="scene-editor" key={i}>
-                  <label>
-                    프롬프트 프리셋
-                    <select
-                      value={sc.preset}
-                      onChange={(e) =>
-                        edit(
-                          (s) => (s.batting_scenes[i].preset = e.target.value),
+                  <div className="batting-settings-heading">
+                    <div>
+                      <h2>테스트할 프리셋</h2>
+                      <p className="micro">크기와 생성 매수를 지정하세요.</p>
+                    </div>
+                    <button
+                      className="outline"
+                      onClick={() =>
+                        edit((s) =>
+                          s.batting_scenes.push({
+                            name: "",
+                            preset: s.prompt_presets[0]?.name || "",
+                            image_size: "portrait",
+                            count: 2,
+                          }),
                         )
                       }
                     >
-                      {state.prompt_presets.map((p) => (
-                        <option key={p.name}>{p.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    이미지 크기
-                    <select
-                      value={sc.image_size}
-                      onChange={(e) =>
-                        edit(
-                          (s) =>
-                            (s.batting_scenes[i].image_size = e.target.value),
-                        )
-                      }
+                      <Plus size={15} />씬 추가
+                    </button>
+                  </div>
+                  <div className="generation-action batting-generation">
+                    <button
+                      className="primary"
+                      disabled={busy || !state.batting_scenes.length}
+                      onClick={() => {
+                        if (state.api.seed >= 0)
+                          setConfirmBattingSeed(state.api.seed);
+                        else void task(() => generate(true));
+                      }}
                     >
-                      <option value="portrait">세로</option>
-                      <option value="landscape">가로</option>
-                      <option value="square">정사각형</option>
-                    </select>
-                  </label>
-                  <label>
-                    매수
-                    <NumericInput
-                      type="number"
-                      min="1"
-                      max="200"
-                      value={sc.count}
-                      onChange={(e) =>
-                        edit(
-                          (s) =>
-                            (s.batting_scenes[i].count =
-                              e.target.valueAsNumber),
-                        )
-                      }
-                    />
-                  </label>
-                  <button
-                    aria-label="씬 삭제"
-                    onClick={() => edit((s) => s.batting_scenes.splice(i, 1))}
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                      <FlaskConical size={15} />
+                      타율 테스트 시작
+                    </button>
+                    <SeedStatus seed={state.api.seed} />
+                  </div>
+                  <div className="notice">
+                    {state.generation.fixed_artists.length
+                      ? `고정 조합 ${state.generation.fixed_artists.length}명 사용`
+                      : "랜덤 모드입니다. 동일 조합으로 비교하려면 작업실에서 이미지의 조합을 불러오세요."}
+                  </div>
+                  {state.batting_scenes.map((sc, i) => (
+                    <section className="scene-editor" key={i}>
+                      <label>
+                        프롬프트 프리셋
+                        <select
+                          value={sc.preset}
+                          onChange={(e) =>
+                            edit(
+                              (s) =>
+                                (s.batting_scenes[i].preset = e.target.value),
+                            )
+                          }
+                        >
+                          {state.prompt_presets.map((p) => (
+                            <option key={p.name}>{p.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        이미지 크기
+                        <select
+                          value={sc.image_size}
+                          onChange={(e) =>
+                            edit(
+                              (s) =>
+                                (s.batting_scenes[i].image_size =
+                                  e.target.value),
+                            )
+                          }
+                        >
+                          <option value="portrait">세로</option>
+                          <option value="landscape">가로</option>
+                          <option value="square">정사각형</option>
+                        </select>
+                      </label>
+                      <label>
+                        매수
+                        <NumericInput
+                          type="number"
+                          min="1"
+                          max="200"
+                          value={sc.count}
+                          onChange={(e) =>
+                            edit(
+                              (s) =>
+                                (s.batting_scenes[i].count =
+                                  e.target.valueAsNumber),
+                            )
+                          }
+                        />
+                      </label>
+                      <button
+                        aria-label="씬 삭제"
+                        onClick={() =>
+                          edit((s) => s.batting_scenes.splice(i, 1))
+                        }
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </section>
+                  ))}
                 </section>
-              ))}
-              <button
-                className="primary"
-                disabled={busy || !state.batting_scenes.length}
-                onClick={() => void task(() => generate(true))}
-              >
-                <FlaskConical size={15} />
-                타율 테스트 시작
-              </button>
+                <BattingResults
+                  history={state.history}
+                  jobs={jobs}
+                  runId={battingRunId}
+                  selectRun={setBattingRunId}
+                />
+              </div>
             </>
           )}
           {tab === "guidance" && (
@@ -1916,6 +1957,16 @@ function App() {
             </>
           )}
         </main>
+      )}
+      {confirmBattingSeed !== null && (
+        <FixedSeedConfirm
+          seed={confirmBattingSeed}
+          cancel={() => setConfirmBattingSeed(null)}
+          confirm={() => {
+            setConfirmBattingSeed(null);
+            void task(() => generate(true));
+          }}
+        />
       )}
       {preview && (
         <div className="modal-backdrop" onClick={() => setPreview(null)}>

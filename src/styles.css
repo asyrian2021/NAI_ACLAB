@@ -1982,3 +1982,311 @@ select optgroup {
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
+
+.generation-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.generation-action > button {
+  flex: 1;
+  min-width: 0;
+}
+.studio-generation {
+  margin-top: 10px;
+}
+.studio-generation .generate {
+  margin-top: 0;
+}
+.seed-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: #969da1;
+  cursor: help;
+}
+.seed-status.fixed {
+  color: #f48282;
+  border-color: #f4828255;
+  background: #f4828210;
+}
+.seed-confirmation {
+  width: min(460px, calc(100% - 32px));
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: inherit;
+  box-shadow: 0 16px 60px #0008;
+}
+.seed-confirmation::backdrop {
+  background: #0009;
+}
+.seed-confirmation h2 {
+  font-size: 17px;
+  margin: 0;
+}
+.seed-confirmation p {
+  margin: 18px 0 24px;
+  line-height: 1.8;
+  color: var(--muted);
+}
+.seed-confirmation strong {
+  color: #f48282;
+}
+.seed-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.batting-layout {
+  display: grid;
+  grid-template-columns: minmax(290px, 330px) minmax(0, 1fr);
+  align-items: start;
+  gap: 32px;
+}
+.batting-settings {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.batting-settings-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-bottom: 18px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.batting-settings-heading h2 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+.batting-settings-heading > div {
+  flex: 1;
+  min-width: 0;
+}
+.batting-settings-heading button {
+  flex-shrink: 0;
+}
+.batting-settings .notice {
+  padding: 12px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+.batting-settings .scene-editor {
+  margin: 16px 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--canvas);
+  grid-template-columns: minmax(0, 1fr) 65px 26px;
+  gap: 10px;
+  padding: 14px;
+}
+.batting-settings .scene-editor > button {
+  padding: 6px;
+}
+.batting-settings .scene-editor > label:first-child {
+  grid-column: 1 / -1;
+}
+.batting-generation {
+  margin-bottom: 16px;
+}
+.batting-results {
+  min-width: 0;
+  position: sticky;
+  top: 16px;
+  display: grid;
+  gap: 20px;
+}
+.batting-preview-panel,
+.batting-gallery {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.batting-gallery {
+  background: var(--canvas);
+}
+.batting-gallery-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.batting-gallery-heading h2 {
+  font-size: 14px;
+  margin: 0;
+}
+.batting-gallery-heading h2 span {
+  margin-left: 6px;
+}
+.batting-results-heading,
+.batting-result-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.batting-results-heading {
+  margin-bottom: 14px;
+}
+.batting-results-heading h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+.batting-results-heading select {
+  max-width: 290px;
+}
+.batting-job-status {
+  margin-bottom: 12px;
+  overflow-wrap: anywhere;
+}
+.batting-result-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: clamp(280px, 45vh, 600px);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--canvas);
+  white-space: normal;
+}
+.batting-result-stage:disabled {
+  opacity: 1;
+}
+.batting-result-stage > img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.batting-result-stage > .muted {
+  padding: 24px;
+}
+.batting-expand-hint {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border-radius: 4px;
+  background: #000b;
+  color: #fff;
+  font-size: 11px;
+}
+.batting-result-caption {
+  margin-top: 14px;
+}
+.batting-image-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 14px;
+  font-size: 12px;
+}
+.batting-image-values strong {
+  width: 100%;
+  color: var(--accent);
+  font-size: 14px;
+}
+.batting-image-values span {
+  color: var(--muted);
+}
+.batting-navigation {
+  gap: 6px;
+}
+.batting-navigation button {
+  padding: 6px 8px;
+}
+.batting-image-count {
+  min-width: 50px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.batting-thumbnails {
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 10px;
+  overscroll-behavior-x: contain;
+  scrollbar-color: var(--line) transparent;
+}
+.batting-result-group {
+  flex: 0 0 auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+}
+.batting-result-group h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.batting-result-group h3 span {
+  margin-left: 6px;
+}
+.batting-result-group > div {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+.batting-result-group button {
+  flex: 0 0 70px;
+  position: relative;
+  width: 70px;
+  height: 85px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  background: var(--canvas);
+  overflow: hidden;
+}
+.batting-result-group button[aria-pressed="true"] {
+  border: 2px solid var(--accent);
+}
+.batting-result-group img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.batting-result-group button span {
+  font-size: 10px;
+}
+.batting-result-group small {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  padding: 1px 4px;
+  background: #000b;
+  color: #fff;
+}
+@media (max-width: 900px) {
+  .batting-layout {
+    grid-template-columns: 1fr;
+  }
+  .batting-results {
+    position: static;
+  }
+}

@@ -14,8 +14,8 @@ test("startup update notice persists, waits for generation and supports download
         w.updateCalls.push(command);
         if (command === "check_update")
           return {
-            current: "2.0.6",
-            version: "2.0.7",
+            current: "2.0.7",
+            version: "2.0.8",
             notes: "Test release notes",
           };
         if (command === "install_update") {
@@ -45,7 +45,7 @@ test("startup update notice persists, waits for generation and supports download
     }),
   );
   await page.goto("/");
-  await page.getByRole("button", { name: "새 버전 2.0.7" }).click();
+  await page.getByRole("button", { name: "새 버전 2.0.8" }).click();
   const dialog = page.getByRole("dialog", { name: "앱 업데이트" });
   await expect(dialog).toContainText("Test release notes");
   await expect(
@@ -67,7 +67,7 @@ test("startup update notice persists, waits for generation and supports download
   ).toBeEnabled();
   await dialog.getByRole("button", { name: "업데이트 창 닫기" }).click();
   await expect(
-    page.getByRole("button", { name: "새 버전 2.0.7" }),
+    page.getByRole("button", { name: "새 버전 2.0.8" }),
   ).toBeVisible();
 });
 
@@ -81,12 +81,12 @@ test("offline update check can retry without blocking the studio", async ({
     w.__TAURI_INTERNALS__ = {
       invoke: async () => {
         if (++calls <= 2) throw new Error("offline");
-        return { current: "2.0.6" };
+        return { current: "2.0.7" };
       },
     };
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "v2.0.6", exact: true }).click();
+  await page.getByRole("button", { name: "v2.0.7", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "앱 업데이트" });
   await expect(dialog).toContainText("업데이트를 확인하지 못했습니다");
   await dialog.getByRole("button", { name: "업데이트 다시 확인" }).click();

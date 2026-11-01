@@ -4,6 +4,7 @@ import { FlaskConical, Maximize2, Minus, Plus, X } from "lucide-react";
 import type { AppState, GuidanceSettings, ImageItem, Job } from "./types";
 import { api } from "./api";
 import { SweepImageViewer } from "./SweepImageViewer";
+import { SeedStatus } from "./SeedStatus";
 
 function axis(min: number, max: number, step: number, cap: number) {
   if (
@@ -463,28 +464,34 @@ export function GuidanceTest({
               ? "현재 체험 모드입니다."
               : "NovelAI API로 격자의 각 칸을 생성합니다."}
           </p>
-          <button
-            className="primary"
-            disabled={
-              busy || submitting || !source || !validSource(source) || !valid
-            }
-            onClick={async () => {
-              setFailure("");
-              setSubmitting(true);
-              try {
-                setRunId(await start());
-              } catch (error) {
-                setFailure((error as Error).message);
-              } finally {
-                setSubmitting(false);
+          <div className="generation-action guidance-generation">
+            <button
+              className="primary"
+              disabled={
+                busy || submitting || !source || !validSource(source) || !valid
               }
-            }}
-          >
-            <FlaskConical size={15} />
-            {submitting
-              ? "추가 중…"
-              : `가이던스 테스트 시작${valid ? ` · ${total}장` : ""}`}
-          </button>
+              onClick={async () => {
+                setFailure("");
+                setSubmitting(true);
+                try {
+                  setRunId(await start());
+                } catch (error) {
+                  setFailure((error as Error).message);
+                } finally {
+                  setSubmitting(false);
+                }
+              }}
+            >
+              <FlaskConical size={15} />
+              {submitting
+                ? "추가 중…"
+                : `가이던스 테스트 시작${valid ? ` · ${total}장` : ""}`}
+            </button>
+            <SeedStatus
+              seed={source?.seed}
+              unsetLabel="원본 이미지를 선택하세요"
+            />
+          </div>
           {failure && (
             <p className="error-text" role="alert">
               {failure}

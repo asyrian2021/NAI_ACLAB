@@ -82,6 +82,23 @@ try {
  await page.keyboard.press('Escape');
  await expect(fullGrid).toHaveCount(0);
  await page.screenshot({path:'test-results/desktop-guidance-test.png'});
+ await page.getByRole('navigation',{name:'주 메뉴'}).getByRole('button',{name:'타율 테스트',exact:true}).click();
+ await page.getByRole('button',{name:'씬 추가',exact:true}).click();
+ await page.locator('.scene-editor input').first().fill('2');
+ await page.getByRole('button',{name:'타율 테스트 시작',exact:true}).click();
+ await page.getByRole('alertdialog',{name:'고정 시드로 시작할까요?',exact:true}).waitFor();
+ await page.getByRole('button',{name:'고정 시드로 시작',exact:true}).click();
+ await expect(page.locator('.batting-thumbnails button')).toHaveCount(2,{timeout:30000});
+ await page.getByRole('button',{name:'타율 테스트 결과 크게 보기',exact:true}).click();
+ const battingViewer=page.getByRole('dialog',{name:'타율 테스트 이미지 확대',exact:true});
+ await expect(battingViewer).toBeVisible();
+ await page.keyboard.press('ArrowRight');
+ await expect(battingViewer.locator('.batting-image-count')).toHaveText('2 / 2');
+ await page.screenshot({path:'test-results/desktop-batting-image-viewer.png'});
+ await page.keyboard.press('Escape');
+ await expect(battingViewer).toHaveCount(0);
+ await expect(page.locator('#root')).toHaveJSProperty('inert',false);
+ await page.screenshot({path:'test-results/desktop-batting-results.png'});
  await page.getByRole('button',{name:'작업실',exact:true}).click();
  const updateCheck = await page.evaluate(async () => {
    try { return await window.__TAURI_INTERNALS__.invoke('check_update'); }
@@ -103,5 +120,5 @@ try {
  execFileSync('python',['scripts/close_test_window.py',String(child.pid)],{windowsHide:true});
  const exit=await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(()=>r('timeout'),10000))]);
  if(exit==='timeout')throw new Error('Desktop did not exit normally');
- console.log(JSON.stringify({webview2:'passed',native_drag_and_save:'passed',guidance_sweep:'passed',studio_test_shortcuts:'passed',image_keyboard_navigation:'passed',updater_ipc:'passed',preset_screen:'passed',single_instance:'passed',window_close:'passed'}));
+ console.log(JSON.stringify({webview2:'passed',native_drag_and_save:'passed',guidance_sweep:'passed',batting_results_and_keyboard:'passed',studio_test_shortcuts:'passed',image_keyboard_navigation:'passed',updater_ipc:'passed',preset_screen:'passed',single_instance:'passed',window_close:'passed'}));
 }finally{if(browser)await browser.close();if(child.exitCode===null){try{execFileSync('python',['scripts/close_test_window.py',String(child.pid)],{windowsHide:true});}catch{}setTimeout(()=>{if(child.exitCode===null)child.kill()},5000);}}
