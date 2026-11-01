@@ -1,6 +1,7 @@
 """Versioned application data and one-way migration from the 1.x split presets."""
 from dataclasses import asdict, dataclass, field, fields
 from copy import deepcopy
+from guidance import grid_values
 import math
 
 
@@ -74,6 +75,17 @@ class BattingScene:
 
 
 @dataclass
+class GuidanceTestSettings:
+    source_path: str = ""
+    x_min: float = 3.0
+    x_max: float = 7.0
+    x_step: float = 1.0
+    y_min: float = 0.0
+    y_max: float = 1.0
+    y_step: float = 0.2
+
+
+@dataclass
 class AppState:
     schema_version: int = 2
     categories: list[Category] = field(default_factory=list)
@@ -84,6 +96,7 @@ class AppState:
     generation: GenerationSettings = field(default_factory=GenerationSettings)
     batting_scenes: list[BattingScene] = field(default_factory=list)
     history: list[dict] = field(default_factory=list)
+    guidance_test: GuidanceTestSettings = field(default_factory=GuidanceTestSettings)
 
 
 REMOVED_FIELDS = {"rating", "style_rating", "stability_rating", "rating_disabled", "rating_count", "learned_rating", "learning_role", "artist_rating_summary", "stability_rating_summary"}
@@ -190,11 +203,13 @@ def state_from_dict(raw: dict) -> AppState:
         generation=construct(GenerationSettings, data.get("generation")),
         batting_scenes=[construct(BattingScene, s) for s in data.get("batting_scenes", [])],
         history=data.get("history", []),
+        guidance_test=construct(GuidanceTestSettings, data.get("guidance_test")),
     )
     return state
 
 
 def validate_state(state: AppState):
+    grid_values(state.guidance_test)
     names = [p.name.strip() for p in state.prompt_presets]
     if any(not n for n in names) or len(names) != len(set(names)):
         raise ValueError("프리셋 이름은 비어 있거나 중복될 수 없습니다.")

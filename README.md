@@ -6,7 +6,7 @@ NovelAI 작가 조합을 무작위로 생성하고, 결과를 크게 감상·비
 
 ## Windows에서 실행
 
-[최신 Windows x64 설치 파일](https://github.com/asyrian2021/NAI_ACLAB/releases/latest/download/NAI-ACLAB-2.0.4-Windows-x64-setup.exe)을 내려받아 설치한 뒤 시작 메뉴의 **NAI ACLAB**을 실행합니다. [릴리스 페이지](https://github.com/asyrian2021/NAI_ACLAB/releases/latest)에서 변경 사항도 확인할 수 있습니다.
+[최신 Windows x64 설치 파일](https://github.com/asyrian2021/NAI_ACLAB/releases/latest/download/NAI-ACLAB-2.0.5-Windows-x64-setup.exe)을 내려받아 설치한 뒤 시작 메뉴의 **NAI ACLAB**을 실행합니다. [릴리스 페이지](https://github.com/asyrian2021/NAI_ACLAB/releases/latest)에서 변경 사항도 확인할 수 있습니다.
 사용자는 Python, Node.js 또는 Rust를 설치할 필요가 없습니다. WebView2가 없는 PC에서는 설치 프로그램이 런타임을 내려받습니다.
 
 Windows x64용입니다. 앱 실행 시 새 버전을 확인하고, 상단 업데이트 버튼으로 내려받아 설치할 수 있습니다.
@@ -60,6 +60,12 @@ API 토큰은 암호화해 저장됩니다.
 
 **타율 테스트** 메뉴에서는 하나의 고정 작가 조합을 여러 프리셋에서 시험할 수 있습니다.
 랜덤 모드로 실행하면 각 이미지마다 새 조합을 추첨합니다.
+
+## 가이던스 테스트
+
+왼쪽의 생성 턴별 기록에서 원본 이미지를 선택하고 큰 프리뷰로 확인한 뒤 X축 Guidance와 Y축 Rescale의 시작·끝·간격(resolution)을 지정합니다. 시작 전에 표시되는 총 이미지 수를 확인하고 테스트를 시작하세요. 한 번에 최대 200장을 생성합니다.
+
+프롬프트·네거티브·작가 순서·시드·크기를 고정하고 두 축의 값만 바꿉니다. 모델·Steps·Sampler가 기록된 이미지는 원본 설정을 사용하며, 해당 정보가 없는 과거 이미지는 현재 설정을 사용합니다. 결과는 축 값이 표시된 비교 격자에 쌓이며, **전체 화면**으로 모든 칸을 화면에 맞춰 보거나 확대·축소할 수 있습니다. Esc로 돌아오며, 격자 이미지를 클릭하면 같은 메뉴 안에서 크게 열립니다. 좌우 방향키로 Guidance, 상하 방향키로 Rescale을 이동할 수 있고 하단에 현재 값이 표시됩니다. 테스트 기록은 재실행 후에도 확인할 수 있습니다.
 
 ## 기존 데이터 이전
 

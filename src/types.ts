@@ -33,6 +33,11 @@ export type ImageItem = {
   seed?: number;
   width?: number;
   height?: number;
+  scale?: number;
+  guidance_rescale?: number;
+  generation_settings?: Partial<Settings>;
+  sweep_x?: number;
+  sweep_y?: number;
   favorite?: boolean;
   mock?: boolean;
   error?: string;
@@ -45,6 +50,13 @@ export type History = {
   created_at: string;
   type?: string;
   items: ImageItem[];
+  sweep?: {
+    source_path: string;
+    source_seed: number;
+    x_values: number[];
+    y_values: number[];
+    settings_source: string;
+  };
 };
 export type Settings = {
   token: string;
@@ -70,7 +82,17 @@ export type Scene = {
   image_size: string;
   count: number;
 };
+export type GuidanceSettings = {
+  source_path: string;
+  x_min: number;
+  x_max: number;
+  x_step: number;
+  y_min: number;
+  y_max: number;
+  y_step: number;
+};
 export type AppState = {
+  guidance_test: GuidanceSettings;
   schema_version: 2;
   categories: Category[];
   prompt_presets: Preset[];

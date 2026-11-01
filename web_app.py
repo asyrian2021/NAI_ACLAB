@@ -21,6 +21,7 @@ from app import (APP_DIR, OUTPUT_DIR, STATE_PATH, NovelAIClient, AppState, Promp
                  load_api_token, load_state, save_state, save_api_token, output_ref,
                  parse_artist_tags, safe_path_name, sanitize_history_entry)
 from models import state_from_dict, validate_state
+from guidance import SETTING_KEYS, grid_values
 
 WEB_DIR = APP_DIR / "web"
 LOCAL_API_TOKEN = secrets.token_urlsafe(32)
@@ -118,10 +119,27 @@ def cancelled(job_id):
         return JOBS[job_id].get("cancel_requested", False)
 
 
-def run_job(job_id, state, batting=False):
+def run_job(job_id, state, batting=False, sweep=None):
     scenes = [(s.preset, scene_state(state, s)) for s in state.batting_scenes] if batting else [(state.generation.preset, state)]
     history = {"id": job_id, "type": "batting_test" if batting else "generation", "preset": state.generation.preset,
                "created_at": time.strftime("%Y-%m-%d %H:%M:%S"), "output_dir": job_id, "items": []}
+    if sweep:
+        source, x_values, y_values, settings_source = sweep
+        history.update(type="guidance_test", preset=source.get('preset', ''), sweep={
+            'source_path': source['path'], 'source_seed': source['seed'], 'x_values': x_values,
+            'y_values': y_values, 'settings_source': settings_source})
+        scenes = []
+        for y_index, rescale in enumerate(y_values):
+            for x_index, scale in enumerate(x_values):
+                cell = deepcopy(state)
+                cell.generation.count = 1
+                cell.generation.preset = source.get('preset', '')
+                cell.api.scale, cell.api.guidance_rescale = scale, rescale
+                scenes.append(((x_index, y_index), cell))
+        with STATE_LOCK:
+            latest = load_state()
+            latest.history.insert(0, deepcopy(history))
+            save_state(latest)
     out_dir = OUTPUT_DIR / job_id
     out_dir.mkdir(parents=True, exist_ok=True)
     progress, failures = 0, 0
@@ -130,15 +148,22 @@ def run_job(job_id, state, batting=False):
         for _ in range(current.generation.count):
             if cancelled(job_id):
                 break
-            prompt, negative, artists = build_prompt(current)
+            if sweep:
+                prompt, negative, artists = source['prompt'], source['negative_prompt'], deepcopy(source.get('artists', []))
+            else:
+                prompt, negative, artists = build_prompt(current)
             path = out_dir / f"image_{progress + 1:04}.png"
             settings = deepcopy(current.api)
             if settings.seed < 0:
                 settings.seed = secrets.randbelow(2**32)
             item = {"path": output_ref(str(path)), "artists": artists, "prompt": prompt, "negative_prompt": negative,
-                    "preset": current.generation.preset, "scene_name": scene_name,
+                    "preset": current.generation.preset, "scene_name": current.generation.preset if sweep else scene_name,
                     "seed": settings.seed, "width": settings.width, "height": settings.height,
                     "mock": settings.mock_mode, "created_at": time.strftime("%Y-%m-%d %H:%M:%S")}
+            item['generation_settings'] = {key: getattr(settings, key) for key in SETTING_KEYS}
+            item['scale'], item['guidance_rescale'] = settings.scale, settings.guidance_rescale
+            if sweep:
+                item['sweep_x'], item['sweep_y'] = scene_name
             try:
                 NovelAIClient(settings).generate(prompt, negative, path)
             except Exception as exc:
@@ -160,10 +185,10 @@ def run_job(job_id, state, batting=False):
 
 def worker_loop():
     while True:
-        job_id, state, batting = WORK.get()
+        job_id, state, batting, sweep = WORK.get()
         try:
             if not cancelled(job_id):
-                run_job(job_id, state, batting)
+                run_job(job_id, state, batting, sweep)
             else:
                 update_job(job_id, status="cancelled")
         except Exception as exc:
@@ -172,26 +197,48 @@ def worker_loop():
             WORK.task_done()
 
 
-def enqueue(state, batting=False):
+def enqueue(state, batting=False, sweep=None):
     global WORKER
     if not state.api.mock_mode and not state.api.token:
         raise ValueError("API 토큰을 입력하거나 체험 모드를 켜세요.")
     if batting and not state.batting_scenes:
         raise ValueError("타율 테스트에 사용할 씬을 추가하세요.")
-    if not batting and not selected_preset(state):
+    if not batting and not sweep and not selected_preset(state):
         raise ValueError("프롬프트 프리셋을 선택하세요.")
     job_id = time.strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:8]
     total = sum(s.count for s in state.batting_scenes) if batting else state.generation.count
+    if sweep:
+        total = len(sweep[1]) * len(sweep[2])
     with JOBS_LOCK:
         if sum(j["status"] in {"queued", "running", "cancelling"} for j in JOBS.values()) >= 20:
             raise ValueError("대기열은 최대 20개까지 추가할 수 있습니다.")
-        JOBS[job_id] = {"id": job_id, "name": "타율 테스트" if batting else state.generation.preset,
+        JOBS[job_id] = {"id": job_id, "name": "가이던스 테스트" if sweep else "타율 테스트" if batting else state.generation.preset,
                         "status": "queued", "progress": 0, "total": total}
         if WORKER is None or not WORKER.is_alive():
             WORKER = threading.Thread(target=worker_loop, daemon=True)
             WORKER.start()
-        WORK.put((job_id, deepcopy(state), batting))
+        WORK.put((job_id, deepcopy(state), batting, deepcopy(sweep)))
     return job_id
+
+
+def prepare_guidance(state):
+    source = next((item for history in state.history for item in history.get('items', [])
+                   if item.get('path') == state.guidance_test.source_path), None)
+    if not source or source.get('error') or not all(key in source for key in ('prompt', 'negative_prompt', 'seed', 'width', 'height')):
+        raise ValueError('프롬프트·시드·크기가 기록된 이미지를 선택하세요.')
+    if type(source['seed']) is not int or not 0 <= source['seed'] < 2**32:
+        raise ValueError('원본 이미지의 시드가 유효하지 않습니다.')
+    x_values, y_values = grid_values(state.guidance_test)
+    current = deepcopy(state)
+    snapshot = source.get('generation_settings', {})
+    recorded = all(key in snapshot for key in SETTING_KEYS)
+    if recorded:
+        for key in SETTING_KEYS:
+            setattr(current.api, key, snapshot[key])
+    current.api.seed = source['seed']
+    current.api.width, current.api.height = source['width'], source['height']
+    validate_state(current)
+    return current, (deepcopy(source), x_values, y_values, 'recorded' if recorded else 'current')
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -278,6 +325,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": str(exc)}, 500)
 
     def post_route(self, route, data):
+        if route == '/api/guidance/generate':
+            state = save_incoming_state(data.get('state', data))
+            current, sweep = prepare_guidance(state)
+            return self.send_json({'job_id': enqueue(current, sweep=sweep)})
         if route in {'/api/state', '/api/preview', '/api/generate', '/api/batting/generate'}:
             state = save_incoming_state(data.get('state', data))
             if route == '/api/state':

@@ -42,6 +42,44 @@ try {
  await expect(page.locator('select option').first()).toHaveCSS('background-color','rgb(48, 50, 52)');
  fs.mkdirSync('test-results',{recursive:true});
  await page.screenshot({path:'test-results/desktop-studio-controls.png'});
+ if(await page.getByRole('button',{name:'대기열 닫기'}).count())await page.getByRole('button',{name:'대기열 닫기'}).click();
+ await page.getByRole('button',{name:'가이던스 테스트',exact:true}).click();
+ await page.getByRole('button',{name:'원본 이미지 1 선택',exact:true}).click();
+ await page.getByLabel('X축 · Guidance 끝',{exact:true}).fill('5.1');
+ await page.getByLabel('X축 · Guidance 시작',{exact:true}).fill('5');
+ await page.getByLabel('X축 · Guidance 간격',{exact:true}).fill('0.1');
+ await page.getByLabel('Y축 · Rescale 끝',{exact:true}).fill('0.2');
+ await page.getByRole('button',{name:'가이던스 테스트 시작 · 4장',exact:true}).click();
+ await expect(page.locator('.sweep-cell img')).toHaveCount(4,{timeout:30000});
+ await page.getByRole('button',{name:'선택한 원본 크게 보기',exact:true}).click();
+ await page.getByRole('dialog',{name:'원본 이미지 프리뷰',exact:true}).waitFor();
+ await page.keyboard.press('Escape');
+ await page.getByRole('button',{name:'전체 화면',exact:true}).click();
+ const fullGrid=page.getByRole('dialog',{name:'비교 격자 전체 화면',exact:true});
+ await expect(fullGrid).toBeVisible();
+ const gridBounds=await fullGrid.boundingBox();
+ const windowSize=await page.evaluate(()=>({width:innerWidth,height:innerHeight}));
+ if(gridBounds.x!==0 || gridBounds.y!==0 || gridBounds.width!==windowSize.width || gridBounds.height!==windowSize.height)throw new Error('Grid did not fill the app viewport');
+ await expect.poll(()=>fullGrid.locator('.sweep-grid-full').evaluate(e=>e.scrollHeight<=e.clientHeight && e.scrollWidth<=e.clientWidth)).toBeTruthy();
+ await page.screenshot({path:'test-results/desktop-guidance-fullscreen.png'});
+ await fullGrid.getByRole('button',{name:'Guidance 5, Rescale 0.2 결과 보기',exact:true}).click();
+ const imageViewer=page.getByRole('dialog',{name:'가이던스 테스트 이미지 확대',exact:true});
+ await expect(imageViewer).toBeVisible();
+ await page.keyboard.press('ArrowRight');
+ await expect(imageViewer.locator('.viewer-guidance')).toHaveText('Guidance 5.1');
+ await page.keyboard.press('ArrowDown');
+ await expect(imageViewer.locator('.viewer-rescale')).toHaveText('Rescale 0');
+ await page.keyboard.press('ArrowUp');
+ await expect(imageViewer.locator('.viewer-rescale')).toHaveText('Rescale 0.2');
+ await page.screenshot({path:'test-results/desktop-guidance-image-viewer.png'});
+ await page.keyboard.press('Escape');
+ await expect(imageViewer).toHaveCount(0);
+ await expect(fullGrid).toBeVisible();
+
+ await page.keyboard.press('Escape');
+ await expect(fullGrid).toHaveCount(0);
+ await page.screenshot({path:'test-results/desktop-guidance-test.png'});
+ await page.getByRole('button',{name:'작업실',exact:true}).click();
  const updateCheck = await page.evaluate(async () => {
    try { return await window.__TAURI_INTERNALS__.invoke('check_update'); }
    catch (error) { return { error: String(error) }; }
@@ -62,5 +100,5 @@ try {
  execFileSync('python',['scripts/close_test_window.py',String(child.pid)],{windowsHide:true});
  const exit=await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(()=>r('timeout'),10000))]);
  if(exit==='timeout')throw new Error('Desktop did not exit normally');
- console.log(JSON.stringify({webview2:'passed',native_drag_and_save:'passed',updater_ipc:'passed',preset_screen:'passed',single_instance:'passed',window_close:'passed'}));
+ console.log(JSON.stringify({webview2:'passed',native_drag_and_save:'passed',guidance_sweep:'passed',image_keyboard_navigation:'passed',updater_ipc:'passed',preset_screen:'passed',single_instance:'passed',window_close:'passed'}));
 }finally{if(browser)await browser.close();if(child.exitCode===null){try{execFileSync('python',['scripts/close_test_window.py',String(child.pid)],{windowsHide:true});}catch{}setTimeout(()=>{if(child.exitCode===null)child.kill()},5000);}}

@@ -38,6 +38,7 @@ import type {
   Settings as ApiSettings,
 } from "./types";
 import "./styles.css";
+import { GuidanceTest } from "./GuidanceTest";
 import { Updater } from "./Updater";
 
 const sizes: Record<string, [number, number]> = {
@@ -555,6 +556,7 @@ function App() {
             ["presets", "프롬프트", Layers],
             ["artists", "작가", SlidersHorizontal],
             ["batting", "타율 테스트", FlaskConical],
+            ["guidance", "가이던스 테스트", SlidersHorizontal],
             ["settings", "설정", Settings],
           ].map(([id, title, Icon]) => (
             <button
@@ -1306,7 +1308,12 @@ function App() {
           </section>
         </>
       ) : (
-        <main className="editor-page" key={tab}>
+        <main
+          className={
+            "editor-page" + (tab === "guidance" ? " guidance-page" : "")
+          }
+          key={tab}
+        >
           {tab === "presets" && (
             <>
               <div className="page-heading">
@@ -1603,7 +1610,7 @@ function App() {
                       한 줄에 하나씩 입력하거나 가중치가 포함된 태그를
                       붙여넣으세요. 저장할 때 정리됩니다.
                     </p>
-                    <div className="four-fields">
+                    <div className="four-fields artist-weight-fields">
                       {(["min_weight", "max_weight", "granule"] as const).map(
                         (key, j) => (
                           <label key={key}>
@@ -1625,50 +1632,56 @@ function App() {
                         ),
                       )}
                     </div>
-                    <label className="row">
-                      <input
-                        type="checkbox"
-                        checked={c.all_artists}
-                        onChange={(e) =>
-                          edit((s) => {
-                            s.categories[i].all_artists = e.target.checked;
-                          })
-                        }
-                      />
-                      등록 작가 전체 사용
-                    </label>
-                    {!c.all_artists && (
-                      <>
-                        <div className="two-fields">
-                          {(["min_picks", "max_picks"] as const).map(
-                            (key, j) => (
-                              <label key={key}>
-                                {j === 0 ? "최소 추첨 인원" : "최대 추첨 인원"}
-                                <NumericInput
-                                  type="number"
-                                  min={1}
-                                  step={1}
-                                  value={c[key]}
-                                  onChange={(e) =>
-                                    edit((s) => {
-                                      s.categories[i][key] =
-                                        e.target.valueAsNumber;
-                                    })
-                                  }
-                                />
-                              </label>
-                            ),
-                          )}
-                        </div>
-                        <p className="micro">
-                          실제 추첨:{" "}
-                          {Math.min(c.min_picks, artistCount(c.tags))}~
-                          {Math.min(c.max_picks, artistCount(c.tags))}명 · 등록{" "}
-                          {artistCount(c.tags)}명. 매 이미지마다 인원을 균등
-                          추첨합니다.
-                        </p>
-                      </>
-                    )}
+                    <div className="artist-draw-settings">
+                      <h3>추첨 인원</h3>
+                      <label className="check artist-all-option">
+                        <input
+                          type="checkbox"
+                          aria-label="등록 작가 전체 사용"
+                          checked={c.all_artists}
+                          onChange={(e) =>
+                            edit((s) => {
+                              s.categories[i].all_artists = e.target.checked;
+                            })
+                          }
+                        />
+                        등록 작가 전체 사용
+                      </label>
+                      {!c.all_artists && (
+                        <>
+                          <div className="two-fields">
+                            {(["min_picks", "max_picks"] as const).map(
+                              (key, j) => (
+                                <label key={key}>
+                                  {j === 0
+                                    ? "최소 추첨 인원"
+                                    : "최대 추첨 인원"}
+                                  <NumericInput
+                                    type="number"
+                                    min={1}
+                                    step={1}
+                                    value={c[key]}
+                                    onChange={(e) =>
+                                      edit((s) => {
+                                        s.categories[i][key] =
+                                          e.target.valueAsNumber;
+                                      })
+                                    }
+                                  />
+                                </label>
+                              ),
+                            )}
+                          </div>
+                          <p className="micro">
+                            실제 추첨:{" "}
+                            {Math.min(c.min_picks, artistCount(c.tags))}~
+                            {Math.min(c.max_picks, artistCount(c.tags))}명 ·
+                            등록 {artistCount(c.tags)}명. 매 이미지마다 인원을
+                            균등 추첨합니다.
+                          </p>
+                        </>
+                      )}
+                    </div>
                   </section>
                 ))}
               </div>
@@ -1769,6 +1782,32 @@ function App() {
                 타율 테스트 시작
               </button>
             </>
+          )}
+          {tab === "guidance" && (
+            <GuidanceTest
+              state={state}
+              jobs={jobs}
+              busy={busy}
+              edit={edit}
+              start={async () => {
+                setBusy(true);
+                try {
+                  await persist();
+                  const queued = await api<{ job_id: string }>(
+                    "guidance/generate",
+                    { state: latest.current },
+                  );
+                  if (!batchRunning.current) batchIds.current.clear();
+                  batchIds.current.add(queued.job_id);
+                  batchRunning.current = true;
+                  wasRunning.current = true;
+                  setMessage("가이던스 테스트를 대기열에 추가했습니다.");
+                  return queued.job_id;
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            />
           )}
           {tab === "settings" && (
             <>
