@@ -1435,3 +1435,18 @@ select optgroup {
   width: 100%;
   accent-color: var(--accent);
 }
+
+.guidance-fields {
+  align-items: end;
+}
+.artist-randomize {
+  font-size: 11px;
+  padding: 4px;
+  gap: 4px;
+}
+.seed-controls {
+  margin-top: 12px;
+}
+.seed-controls .seed-setting {
+  margin: 0 0 8px;
+}

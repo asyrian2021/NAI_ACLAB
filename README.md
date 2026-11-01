@@ -6,7 +6,7 @@ NovelAI 작가 조합을 무작위로 생성하고, 결과를 크게 감상·비
 
 ## Windows에서 실행
 
-[최신 Windows x64 설치 파일](https://github.com/asyrian2021/NAI_ACLAB/releases/latest/download/NAI-ACLAB-2.0.2-Windows-x64-setup.exe)을 내려받아 설치한 뒤 시작 메뉴의 **NAI ACLAB**을 실행합니다. [릴리스 페이지](https://github.com/asyrian2021/NAI_ACLAB/releases/latest)에서 변경 사항도 확인할 수 있습니다.
+[최신 Windows x64 설치 파일](https://github.com/asyrian2021/NAI_ACLAB/releases/latest/download/NAI-ACLAB-2.0.3-Windows-x64-setup.exe)을 내려받아 설치한 뒤 시작 메뉴의 **NAI ACLAB**을 실행합니다. [릴리스 페이지](https://github.com/asyrian2021/NAI_ACLAB/releases/latest)에서 변경 사항도 확인할 수 있습니다.
 사용자는 Python, Node.js 또는 Rust를 설치할 필요가 없습니다. WebView2가 없는 PC에서는 설치 프로그램이 런타임을 내려받습니다.
 
 Windows x64용입니다. 앱 실행 시 새 버전을 확인하고, 상단 업데이트 버튼으로 내려받아 설치할 수 있습니다.
@@ -46,7 +46,7 @@ Windows x64용입니다. 앱 실행 시 새 버전을 확인하고, 상단 업�
 - 고정 조합은 순서와 가중치를 유지합니다.
 - 평가·평점·학습과 학습에 따른 확률 보정은 없습니다. 무작위이므로 같은 결과가 다시 선택될 수 있습니다.
 
-작업실에서 시드의 랜덤/고정 모드와 숫자, Prompt guidance와 Guidance rescale을 조절할 수 있습니다. 결과의 **이 시드 사용**으로 선택한 이미지의 시드를 고정할 수 있으며, 이미지를 선택하는 것만으로 설정이 바뀌지는 않습니다. 가이던스만 비교하려면 작가 조합과 순서도 고정하세요.
+작업실 왼쪽에서 Prompt guidance와 Guidance rescale을 조절할 수 있습니다. 오른쪽 결과의 **이 시드 사용**으로 선택한 이미지의 시드를 고정하고 **시드 고정 해제**로 랜덤으로 되돌릴 수 있으며, 이미지를 선택하는 것만으로 설정이 바뀌지는 않습니다. 가이던스만 비교하려면 작가 조합과 순서도 고정하세요.
 
 ## 생성과 대기열
 

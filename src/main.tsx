@@ -129,7 +129,6 @@ function App() {
   const [revision, setRevision] = useState(0);
   const [saveStatus, setSaveStatus] = useState("자동 저장됨");
   const saveChain = useRef<Promise<unknown>>(Promise.resolve());
-  const lastSeed = useRef(0);
   const [quota, setQuota] = useState<Record<string, unknown> | null>(null);
   const drag = useRef<{ x: number; y: number } | null>(null),
     latest = useRef(state),
@@ -505,6 +504,39 @@ function App() {
       />
     </label>
   );
+  const seedControls = (
+    <div className="seed-controls">
+      <p className="micro selectable seed-setting">
+        다음 생성:{" "}
+        {state.api.seed === -1 ? "랜덤 시드" : `Seed ${state.api.seed} 고정`}
+      </p>
+      {current?.seed !== undefined && (
+        <button
+          className="outline full"
+          aria-pressed={state.api.seed === current.seed}
+          onClick={() =>
+            edit((s) => {
+              s.api.seed = current.seed!;
+            })
+          }
+        >
+          이 시드 사용
+        </button>
+      )}
+      {state.api.seed !== -1 && (
+        <button
+          className="text-button"
+          onClick={() =>
+            edit((s) => {
+              s.api.seed = -1;
+            })
+          }
+        >
+          시드 고정 해제
+        </button>
+      )}
+    </div>
+  );
   return (
     <div
       className={
@@ -683,29 +715,9 @@ function App() {
                     {field("height", "세로 픽셀")}
                   </div>
                 )}
-                <div className="two-fields">
+                <div className="two-fields guidance-fields">
                   {field("scale", "Prompt guidance")}
                   {field("guidance_rescale", "Guidance rescale")}
-                </div>
-                <div className="two-fields">
-                  <label>
-                    시드 모드
-                    <select
-                      value={state.api.seed === -1 ? "random" : "fixed"}
-                      onChange={(e) =>
-                        edit((s) => {
-                          if (e.target.value === "random") {
-                            if (s.api.seed >= 0) lastSeed.current = s.api.seed;
-                            s.api.seed = -1;
-                          } else s.api.seed = lastSeed.current;
-                        })
-                      }
-                    >
-                      <option value="random">랜덤</option>
-                      <option value="fixed">고정</option>
-                    </select>
-                  </label>
-                  {state.api.seed !== -1 && field("seed", "Seed")}
                 </div>
                 <button
                   className="outline full"
@@ -744,9 +756,21 @@ function App() {
               <section>
                 <div className="section-heading">
                   <h2>작가 조합</h2>
-                  <span className="badge">
-                    {state.generation.fixed_artists.length ? "고정" : "랜덤"}
-                  </span>
+                  {state.generation.fixed_artists.length ? (
+                    <button
+                      className="text-button artist-randomize"
+                      onClick={() =>
+                        edit((s) => {
+                          s.generation.fixed_artists = [];
+                        })
+                      }
+                    >
+                      <Shuffle size={13} />
+                      랜덤으로 전환
+                    </button>
+                  ) : (
+                    <span className="badge">랜덤</span>
+                  )}
                 </div>
                 {state.generation.fixed_artists.length ? (
                   <>
@@ -860,15 +884,6 @@ function App() {
                         </div>
                       </div>
                     ))}
-                    <button
-                      className="outline full"
-                      onClick={() =>
-                        edit((s) => (s.generation.fixed_artists = []))
-                      }
-                    >
-                      <Shuffle size={14} />
-                      랜덤으로 전환
-                    </button>
                   </>
                 ) : (
                   <>
@@ -1051,19 +1066,7 @@ function App() {
                     <p className="micro selectable">
                       {current.seed !== undefined ? `Seed ${current.seed}` : ""}
                     </p>
-                    {current.seed !== undefined && (
-                      <button
-                        className="outline full"
-                        onClick={() =>
-                          edit((s) => {
-                            s.api.seed = current.seed!;
-                            lastSeed.current = current.seed!;
-                          })
-                        }
-                      >
-                        이 시드 사용
-                      </button>
-                    )}
+                    {seedControls}
                   </section>
                   <section>
                     <div className="section-heading">
@@ -1171,6 +1174,7 @@ function App() {
                 </>
               ) : (
                 <div className="empty-info">
+                  {state.api.seed !== -1 && seedControls}
                   <Layers size={25} />
                   <h2>이미지의 레시피</h2>
                   <p>

@@ -30,11 +30,15 @@ try {
  await page.reload();
  await page.locator('.drag-handle').first().waitFor();
  if((await page.locator('.fixed-artist-heading span').allTextContents()).join(',')!==order.join(','))throw new Error('Reorder did not persist');
- await page.getByLabel('시드 모드').selectOption('fixed');
- await page.getByLabel('Seed',{exact:true}).fill('9876');
+ await page.getByLabel('생성 매수',{exact:true}).fill('1');
+ await page.getByRole('button',{name:'체험 이미지 생성',exact:true}).click();
+ await page.getByRole('button',{name:'이 시드 사용',exact:true}).click();
+ const fixedSeedText=await page.locator('.seed-setting').innerText();
  await expect(page.locator('.save-status')).toHaveText('자동 저장됨');
  await page.reload();
- await expect(page.getByLabel('Seed',{exact:true})).toHaveValue('9876');
+ await expect(page.locator('.seed-setting')).toHaveText(fixedSeedText);
+ await expect(page.locator('.left-panel').getByLabel('시드 모드')).toHaveCount(0);
+ await expect(page.locator('.left-panel .section-heading').getByRole('button',{name:'랜덤으로 전환',exact:true})).toBeVisible();
  await expect(page.locator('select option').first()).toHaveCSS('background-color','rgb(48, 50, 52)');
  fs.mkdirSync('test-results',{recursive:true});
  await page.screenshot({path:'test-results/desktop-studio-controls.png'});

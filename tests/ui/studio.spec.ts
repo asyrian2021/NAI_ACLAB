@@ -119,6 +119,11 @@ test("unified presets, global prompts, random generation, comparison and persist
   await expect(
     page.getByRole("button", { name: "랜덤으로 전환", exact: true }),
   ).toBeVisible();
+  await expect(
+    page
+      .locator(".left-panel .section-heading")
+      .getByRole("button", { name: "랜덤으로 전환", exact: true }),
+  ).toBeVisible();
   await expect(page.locator(".save-status")).toHaveText("자동 저장됨");
   await page.reload();
   await expect(page.getByLabel("가로 픽셀")).toHaveValue("128");
@@ -258,7 +263,9 @@ test("autosave, count ranges and studio seed controls", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "작가", exact: true }).click();
   const group = page.locator(".artist-editors > section").first();
-  await group.getByRole("textbox", { name: "작가 태그", exact: true }).fill("artist:a\nartist:b\nartist:c\nartist:d\nartist:e");
+  await group
+    .getByRole("textbox", { name: "작가 태그", exact: true })
+    .fill("artist:a\nartist:b\nartist:c\nartist:d\nartist:e");
   await group.getByLabel("등록 작가 전체 사용").uncheck();
   await group.getByLabel("최대 추첨 인원").fill("5");
   await group.getByLabel("최소 추첨 인원").fill("3");
@@ -276,47 +283,111 @@ test("autosave, count ranges and studio seed controls", async ({ page }) => {
   await group.getByLabel("최소 추첨 인원").fill("3");
   await expect(page.locator(".save-status")).toHaveText("자동 저장됨");
   await page.getByRole("button", { name: "작업실", exact: true }).click();
-  await page.getByLabel("시드 모드").selectOption("fixed");
-  await page.getByLabel("Seed", { exact: true }).fill("12345");
+  await expect(page.locator(".left-panel").getByLabel("시드 모드")).toHaveCount(
+    0,
+  );
+  await expect(
+    page.locator(".left-panel").getByLabel("Seed", { exact: true }),
+  ).toHaveCount(0);
+  for (const width of [880, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const first = await page
+      .getByLabel("Prompt guidance", { exact: true })
+      .boundingBox();
+    const second = await page
+      .getByLabel("Guidance rescale", { exact: true })
+      .boundingBox();
+    expect(first!.y).toBe(second!.y);
+    expect(first!.height).toBe(second!.height);
+  }
+  await page.getByRole("button", { name: "이 시드 사용", exact: true }).click();
+  const seedText = await page.locator(".seed-setting").innerText();
+  const fixedSeed = seedText.match(/Seed (\d+)/)![1];
   await page.getByLabel("Prompt guidance", { exact: true }).fill("6");
   await page.getByLabel("Guidance rescale", { exact: true }).fill("0.4");
   await expect(page.locator(".save-status")).toHaveText("자동 저장됨");
   await page.reload();
-  await expect(page.getByLabel("Seed", { exact: true })).toHaveValue("12345");
-  await expect(page.getByLabel("Prompt guidance", { exact: true })).toHaveValue("6");
+  await expect(page.locator(".seed-setting")).toContainText(
+    `Seed ${fixedSeed} 고정`,
+  );
+  await expect(page.getByLabel("Prompt guidance", { exact: true })).toHaveValue(
+    "6",
+  );
   const groupsBefore = await page.locator(".generation-group").count();
   await page.getByLabel("생성 매수", { exact: true }).fill("1");
-  await page.getByRole("button", { name: "체험 이미지 생성", exact: true }).click();
-  await expect(page.locator(".generation-group")).toHaveCount(groupsBefore + 1, { timeout: 30000 });
+  await page
+    .getByRole("button", { name: "체험 이미지 생성", exact: true })
+    .click();
+  await expect(page.locator(".generation-group")).toHaveCount(
+    groupsBefore + 1,
+    { timeout: 30000 },
+  );
   await page.locator(".thumbnail-button").first().click();
-  await expect(page.locator(".right-panel")).toContainText("Seed 12345");
-  await page.getByLabel("시드 모드").selectOption("random");
+  await expect(page.locator(".right-panel")).toContainText(`Seed ${fixedSeed}`);
+  await page
+    .getByRole("button", { name: "시드 고정 해제", exact: true })
+    .click();
+  await expect(page.locator(".seed-setting")).toContainText("랜덤 시드");
   await page.getByRole("button", { name: "이 시드 사용", exact: true }).click();
-  await expect(page.getByLabel("Seed", { exact: true })).toHaveValue("12345");
+  await expect(page.locator(".seed-setting")).toContainText(
+    `Seed ${fixedSeed} 고정`,
+  );
   await page.locator(".thumbnail-button").last().click();
-  await expect(page.getByLabel("Seed", { exact: true })).toHaveValue("12345");
-  await expect(page.locator("select option").first()).toHaveCSS("background-color", "rgb(48, 50, 52)");
+  await expect(page.locator(".seed-setting")).toContainText(
+    `Seed ${fixedSeed} 고정`,
+  );
+  await expect(page.locator("select option").first()).toHaveCSS(
+    "background-color",
+    "rgb(48, 50, 52)",
+  );
 });
 
-
-test("footer progress combines a queue batch and notifications expire", async ({ page }) => {
-  let jobs = [{ id: "progress-a", name: "test", status: "running", progress: 1, total: 4 }];
-  await page.route("**/api/jobs", route => route.fulfill({ json: { jobs } }));
+test("footer progress combines a queue batch and notifications expire", async ({
+  page,
+}) => {
+  let jobs = [
+    {
+      id: "progress-a",
+      name: "test",
+      status: "running",
+      progress: 1,
+      total: 4,
+    },
+  ];
+  await page.route("**/api/jobs", (route) => route.fulfill({ json: { jobs } }));
   await page.goto("/");
-  const bar = page.getByRole("progressbar", { name: "전체 이미지 생성 진행률" });
+  const bar = page.getByRole("progressbar", {
+    name: "전체 이미지 생성 진행률",
+  });
   await expect(bar).toHaveAttribute("aria-valuenow", "1");
   await expect(bar).toHaveAttribute("aria-valuemax", "4");
-  jobs = [{ id: "progress-a", name: "test", status: "done", progress: 4, total: 4 }, { id: "progress-b", name: "test2", status: "running", progress: 2, total: 6 }];
+  jobs = [
+    { id: "progress-a", name: "test", status: "done", progress: 4, total: 4 },
+    {
+      id: "progress-b",
+      name: "test2",
+      status: "running",
+      progress: 2,
+      total: 6,
+    },
+  ];
   await expect(bar).toHaveAttribute("aria-valuenow", "6");
   await expect(bar).toHaveAttribute("aria-valuemax", "10");
-  await page.getByRole("button", { name: "프롬프트 미리보기", exact: true }).click();
+  await page
+    .getByRole("button", { name: "프롬프트 미리보기", exact: true })
+    .click();
   await expect(page.getByRole("status")).toContainText("미리 조합");
-  await expect(page.getByRole("status")).not.toContainText("미리 조합", { timeout: 3500 });
+  await expect(page.getByRole("status")).not.toContainText("미리 조합", {
+    timeout: 3500,
+  });
   await expect(bar).toHaveAttribute("aria-valuenow", "6");
-  jobs = jobs.map(j => ({ ...j, status: "done", progress: j.total }));
+  jobs = jobs.map((j) => ({ ...j, status: "done", progress: j.total }));
   await expect(bar).toHaveAttribute("aria-valuenow", "10");
   await expect(page.locator(".total-progress")).not.toHaveClass(/running/);
-  jobs = [...jobs, { id: "progress-c", name: "new", status: "running", progress: 0, total: 3 }];
+  jobs = [
+    ...jobs,
+    { id: "progress-c", name: "new", status: "running", progress: 0, total: 3 },
+  ];
   await expect(bar).toHaveAttribute("aria-valuemax", "3");
   await expect(bar).toHaveAttribute("aria-valuenow", "0");
 });
