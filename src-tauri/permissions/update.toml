@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-app-update"
+description = "Allow signed app updates from the local studio window."
+commands.allow = ["check_update", "install_update"]

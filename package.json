@@ -1,18 +1,26 @@
 {
   "name": "nai-aclab",
-  "version": "1.2.3",
-  "description": "Local web UI for experimenting with NovelAI artist tag weight combinations.",
+  "version": "2.0.1",
+  "private": true,
+  "description": "NAI ACLAB desktop image studio",
   "license": "MIT",
-  "type": "commonjs",
+  "type": "module",
   "bin": {
     "nai-aclab": "bin/nai-artist-lab.js",
     "nai-artist-lab": "bin/nai-artist-lab.js"
   },
   "scripts": {
-    "start": "node bin/nai-artist-lab.js"
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "start": "python launcher.py",
+    "desktop:dev": "npm run build && python scripts/build_sidecar.py && tauri dev",
+    "desktop:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_desktop.ps1",
+    "test": "python -m unittest discover -s tests",
+    "test:ui": "playwright test"
   },
   "files": [
     "app.py",
+    "models.py",
     "web_app.py",
     "launcher.py",
     "web/",
@@ -20,6 +28,22 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=22.12"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.12.4",
+    "lucide-react": "^0.468.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@tauri-apps/cli": "^2.9.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "prettier": "^3.9.10",
+    "typescript": "^5.9.0",
+    "vite": "^7.2.0"
   }
 }

@@ -1,0 +1,14 @@
+{
+  "identifier": "desktop",
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*"
+    ]
+  },
+  "permissions": [
+    "allow-app-update"
+  ]
+}

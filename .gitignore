@@ -7,3 +7,14 @@ outputs/
 *.log
 *.tgz
 .env
+.tools/
+build/
+dist/
+src-tauri/target/
+src-tauri/binaries/*.exe
+.test-data/
+test-results/
+playwright-report/
+web/assets/
+
+src-tauri/gen/
