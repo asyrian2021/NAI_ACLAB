@@ -185,7 +185,10 @@ kbd {
   color: var(--muted);
 }
 .app {
-  min-height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
   display: flex;
   flex-direction: column;
 }
@@ -646,6 +649,13 @@ details[open] > summary {
   font-size: 11px;
   min-height: 36px;
 }
+.status-dock {
+  position: relative;
+  flex-shrink: 0;
+}
+.app > .notice {
+  flex-shrink: 0;
+}
 .statusbar button {
   font-size: 11px;
   padding: 3px 6px;
@@ -720,6 +730,8 @@ details[open] > summary {
 }
 .editor-page {
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   padding: 36px 40px 50px;
   max-width: 1280px;
   width: 100%;
@@ -1160,12 +1172,12 @@ details[open] > summary {
   min-height: 0;
   padding: 16px;
 }
-.studio-layout .queue-panel {
+.status-dock .queue-panel {
   position: absolute;
-  bottom: 36px;
+  bottom: calc(100% + 8px);
   right: 12px;
   width: min(520px, calc(100% - 24px));
-  max-height: min(300px, 50%);
+  max-height: min(300px, 50dvh);
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: 0 10px 30px #0008;
@@ -1455,17 +1467,23 @@ select optgroup {
   padding: 0;
   min-height: 0;
   flex: 1;
+  overflow: hidden;
 }
 .guidance-test {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   min-height: 0;
+  height: 100%;
+}
+.sweep-main {
+  min-height: 0;
+  overflow-y: auto;
 }
 .sweep-sources {
   border-right: 1px solid var(--line);
   padding: 18px 14px;
   background: var(--panel);
-  height: calc(100dvh - 100px);
+  height: 100%;
   overflow: auto;
   position: sticky;
   top: 0;
