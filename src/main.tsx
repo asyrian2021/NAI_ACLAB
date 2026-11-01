@@ -493,7 +493,7 @@ function App() {
       {title}
       <NumericInput
         type={type}
-        step="any"
+        step={key === "scale" || key === "guidance_rescale" ? 0.1 : "any"}
         value={String(state.api[key] ?? "")}
         onChange={(e) =>
           edit((s) => {
@@ -516,14 +516,14 @@ function App() {
           aria-pressed={state.api.seed === current.seed}
           onClick={() =>
             edit((s) => {
-              s.api.seed = current.seed!;
+              s.api.seed = s.api.seed === current.seed ? -1 : current.seed!;
             })
           }
         >
           이 시드 사용
         </button>
       )}
-      {state.api.seed !== -1 && (
+      {state.api.seed !== -1 && current?.seed === undefined && (
         <button
           className="text-button"
           onClick={() =>

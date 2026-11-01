@@ -303,6 +303,22 @@ test("autosave, count ranges and studio seed controls", async ({ page }) => {
   await page.getByRole("button", { name: "이 시드 사용", exact: true }).click();
   const seedText = await page.locator(".seed-setting").innerText();
   const fixedSeed = seedText.match(/Seed (\d+)/)![1];
+  await expect(
+    page.getByRole("button", { name: "이 시드 사용", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.getByRole("button", { name: "시드 고정 해제", exact: true }),
+  ).toHaveCount(0);
+  for (const title of ["Prompt guidance", "Guidance rescale"]) {
+    const input = page.getByLabel(title, { exact: true });
+    await input.fill(title === "Prompt guidance" ? "5" : "0.4");
+    await input.press("ArrowUp");
+    await expect(input).toHaveValue(
+      title === "Prompt guidance" ? "5.1" : "0.5",
+    );
+    await input.press("ArrowDown");
+    await expect(input).toHaveValue(title === "Prompt guidance" ? "5" : "0.4");
+  }
   await page.getByLabel("Prompt guidance", { exact: true }).fill("6");
   await page.getByLabel("Guidance rescale", { exact: true }).fill("0.4");
   await expect(page.locator(".save-status")).toHaveText("자동 저장됨");
@@ -324,9 +340,13 @@ test("autosave, count ranges and studio seed controls", async ({ page }) => {
   );
   await page.locator(".thumbnail-button").first().click();
   await expect(page.locator(".right-panel")).toContainText(`Seed ${fixedSeed}`);
-  await page
-    .getByRole("button", { name: "시드 고정 해제", exact: true })
-    .click();
+  await page.getByRole("button", { name: "이 시드 사용", exact: true }).click();
+  await expect(page.locator(".seed-setting")).toContainText("랜덤 시드");
+  await expect(
+    page.getByRole("button", { name: "이 시드 사용", exact: true }),
+  ).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(".save-status")).toHaveText("자동 저장됨");
+  await page.reload();
   await expect(page.locator(".seed-setting")).toContainText("랜덤 시드");
   await page.getByRole("button", { name: "이 시드 사용", exact: true }).click();
   await expect(page.locator(".seed-setting")).toContainText(
