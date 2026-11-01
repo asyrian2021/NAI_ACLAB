@@ -9,7 +9,7 @@ NovelAI 작가 조합을 무작위로 생성하고, 결과를 크게 감상·비
 [최신 Windows x64 설치 파일](https://github.com/asyrian2021/NAI_ACLAB/releases/latest/download/NAI-ACLAB-2.0.1-Windows-x64-setup.exe)을 내려받아 설치한 뒤 시작 메뉴의 **NAI ACLAB**을 실행합니다. [릴리스 페이지](https://github.com/asyrian2021/NAI_ACLAB/releases/latest)에서 변경 사항도 확인할 수 있습니다.
 사용자는 Python, Node.js 또는 Rust를 설치할 필요가 없습니다. WebView2가 없는 PC에서는 설치 프로그램이 런타임을 내려받습니다.
 
-Windows x64용입니다. 앱 실행 시 새 버전을 확인하고, 상단 업데이트 버튼으로 내려받아 설치할 수 있습니다. 업데이트 파일의 무결성과 배포자는 별도의 업데이트 서명으로 검증합니다. Windows Authenticode 코드 서명은 적용하지 않았습니다.
+Windows x64용입니다. 앱 실행 시 새 버전을 확인하고, 상단 업데이트 버튼으로 내려받아 설치할 수 있습니다.
 
 ## 작업실
 
@@ -52,10 +52,10 @@ Windows x64용입니다. 앱 실행 시 새 버전을 확인하고, 상단 업�
 
 처음에는 **API 없이 체험하기**가 켜져 있습니다. 실제 API 대신 그라데이션 테스트 이미지를 만듭니다.
 실제로 생성하려면 **설정**에서 NovelAI API 토큰을 저장하고 체험 모드를 끕니다.
-토큰은 Windows DPAPI로 암호화해 저장하며 화면과 상태 JSON에는 돌려주지 않습니다.
+API 토큰은 암호화해 저장됩니다.
 
 대기열은 순서대로 실행되며 각 작업은 추가 당시의 설정을 사용합니다. 중지는 현재 API 요청이 끝난 뒤 적용됩니다.
-앱을 닫으면 엔진도 종료됩니다. 완료한 결과는 남지만 진행 중 요청과 미실행 대기열은 재개되지 않습니다.
+앱을 닫으면 생성 작업도 종료됩니다. 완료한 결과는 남지만 진행 중 요청과 미실행 대기열은 재개되지 않습니다.
 앱을 중복 실행하면 기존 창으로 돌아갑니다. 하단 진행 막대는 현재 대기열의 처리 장수와 전체 장수를 표시하며, 일반 알림은 3초 뒤 사라집니다.
 
 **타율 테스트** 메뉴에서는 하나의 고정 작가 조합을 여러 프리셋에서 시험할 수 있습니다.
@@ -64,7 +64,6 @@ Windows x64용입니다. 앱 실행 시 새 버전을 확인하고, 상단 업�
 ## 기존 데이터 이전
 
 기본 저장 위치는 기존과 같은 `%USERPROFILE%\nai_aclab`입니다.
-개발·테스트 시 `NAI_ARTIST_LAB_USER_DIR`로 별도 위치를 지정할 수 있습니다.
 
 첫 실행 시 1.x 데이터를 읽어 다음과 같이 이전합니다.
 
@@ -76,62 +75,3 @@ Windows x64용입니다. 앱 실행 시 새 버전을 확인하고, 상단 업�
 
 2.0에서 변경한 데이터는 1.x와 호환되지 않습니다. 두 버전을 동시에 실행하지 마세요.
 기록 삭제는 목록에서만 제거하며 이미지 파일은 유지합니다.
-
-## 개발 및 빌드
-
-개발 환경: Windows x64, Node.js 22.12+, Python 3.13, Rust stable, Visual Studio C++ Build Tools, WebView2.
-
-```powershell
-npm ci
-python -m pip install -r requirements-build.txt
-npm run build
-npm start
-```
-
-`npm start`는 개발 확인용 로컬 브라우저 실행입니다. 실제 데스크톱 창과 설치 프로그램은 다음 명령을 사용합니다.
-
-```powershell
-npm run desktop:dev
-npm run desktop:build
-```
-
-프로젝트 내부 `.tools/cargo`에 Rust를 설치한 경우에는 빌드 전에 다음 환경을 지정합니다.
-
-```powershell
-$env:RUSTUP_HOME = Join-Path $PWD '.tools/rustup'
-$env:CARGO_HOME = Join-Path $PWD '.tools/cargo'
-$env:PATH = (Join-Path $PWD '.tools/cargo/bin') + ';' + $env:PATH
-```
-
-설치·배포 파일: `dist/NAI-ACLAB-2.0.1-Windows-x64-setup.exe`, `.sig`, `latest.json`, `SHA256SUMS.txt`. 서명 키 준비 방법은 아래 업데이트 배포 준비를 참고하세요.
-
-React 결과물을 Python 엔진에 포함하고 PyInstaller로 패키징합니다. Tauri가 엔진을 실행하고 임의의 localhost 포트에 연결합니다. 엔진은 세션 토큰으로 API를 보호하고, 부모 앱 종료 시 함께 종료됩니다. 현재 로컬 앱 창에는 서명된 업데이트를 확인·설치하는 두 네이티브 명령만 허용합니다.
-
-주요 소스: `src/` 화면, `models.py` 데이터·이전, `app.py` 생성 엔진, `web_app.py` 로컬 API·대기열, `src-tauri/` 데스크톱 셸.
-
-## 검증
-
-```powershell
-New-Item -ItemType Directory -Force .test-data
-npm test
-npm run build
-npm run test:ui
-python scripts/test_packaged_engine.py
-```
-
-브라우저 테스트는 설치된 Microsoft Edge를 사용합니다. 모든 테스트는 격리된 데이터와 체험 모드를 사용하며 실제 NovelAI 크레딧을 소모하지 않습니다.
-GitHub Actions의 **Windows installer** 워크플로는 수동 실행 시 설치 파일을 아티팩트로 생성합니다. 자동 게시나 npm publish는 하지 않습니다.
-
-## 앱 업데이트
-
-설치형 앱은 실행할 때 GitHub Release의 `latest.json`을 확인합니다. 상단에 새 버전이 표시되면 버튼을 눌러 변경 내용을 보고 **지금 업데이트**를 선택합니다. 다운로드 진행률이 표시되고 서명 검증을 통과하면 앱을 종료하여 설치한 뒤 다시 실행합니다. 생성 중에는 설치 버튼을 사용할 수 없습니다. 인터넷 연결이 없으면 앱을 계속 사용할 수 있으며 업데이트 창에서 다시 확인할 수 있습니다.
-
-기존 2.0.0에는 업데이트 기능이 없으므로 2.0.1 설치 파일을 한 번 설치해야 합니다.
-
-### 업데이트 배포 준비
-
-- `npm run desktop:build`는 서명된 설치 파일과 `.sig`, `latest.json`, `SHA256SUMS.txt`를 `dist/`에 준비합니다. 공개 배포는 수행하지 않습니다.
-- 로컬 서명 키는 Git에서 제외한 `.tools/updater/private.key`에 있습니다. 이 키를 안전하게 백업해야 기존 사용자에게 계속 업데이트를 배포할 수 있습니다. 공개 키만 앱 설정에 포함됩니다.
-- GitHub Actions에는 동일한 개인 키를 `TAURI_SIGNING_PRIVATE_KEY` secret으로, 암호가 있으면 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`로 등록합니다.
-- 버전을 올릴 때 `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `Cargo.lock`, `tauri.conf.json`을 함께 갱신합니다.
-- 해당 버전의 GitHub Release `v버전`에 설치 EXE, `.sig`, `latest.json`, 해시 파일을 첨부한 뒤 정식 릴리스로 공개하면 앱에서 감지합니다. 초안과 사전 릴리스는 일반 업데이트에 사용하지 않습니다.
