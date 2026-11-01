@@ -6,7 +6,7 @@ NovelAI 작가 조합을 무작위로 생성하고, 결과를 크게 감상·비
 
 ## Windows에서 실행
 
-[최신 Windows x64 설치 파일](https://github.com/asyrian2021/NAI_ACLAB/releases/latest/download/NAI-ACLAB-2.0.1-Windows-x64-setup.exe)을 내려받아 설치한 뒤 시작 메뉴의 **NAI ACLAB**을 실행합니다. [릴리스 페이지](https://github.com/asyrian2021/NAI_ACLAB/releases/latest)에서 변경 사항도 확인할 수 있습니다.
+[최신 Windows x64 설치 파일](https://github.com/asyrian2021/NAI_ACLAB/releases/latest/download/NAI-ACLAB-2.0.2-Windows-x64-setup.exe)을 내려받아 설치한 뒤 시작 메뉴의 **NAI ACLAB**을 실행합니다. [릴리스 페이지](https://github.com/asyrian2021/NAI_ACLAB/releases/latest)에서 변경 사항도 확인할 수 있습니다.
 사용자는 Python, Node.js 또는 Rust를 설치할 필요가 없습니다. WebView2가 없는 PC에서는 설치 프로그램이 런타임을 내려받습니다.
 
 Windows x64용입니다. 앱 실행 시 새 버전을 확인하고, 상단 업데이트 버튼으로 내려받아 설치할 수 있습니다.

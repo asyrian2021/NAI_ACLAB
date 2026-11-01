@@ -36,6 +36,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .setup(|app| {
             let directory = std::env::current_exe()?.parent().unwrap().to_path_buf();
             let bundled = directory.join("nai-engine.exe");
+            #[cfg(not(debug_assertions))]
+            let executable = bundled;
+            #[cfg(debug_assertions)]
             let executable = if bundled.exists() { bundled } else {
                 std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries/nai-engine-x86_64-pc-windows-msvc.exe")
             };

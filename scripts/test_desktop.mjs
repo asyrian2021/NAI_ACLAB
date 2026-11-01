@@ -3,6 +3,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 const root=process.cwd();
+const appVersion=JSON.parse(fs.readFileSync('package.json','utf8')).version;
 const exe=path.join(root,'src-tauri/target/release/nai-aclab.exe');
 const child=spawn(exe,[],{windowsHide:true,env:{...process.env,NAI_ARTIST_LAB_USER_DIR:path.join(root,'.test-data','desktop-'+Date.now()),NAI_ACLAB_HEADLESS_TEST:'1',WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:'--remote-debugging-port=19223'}});
 let browser;
@@ -42,7 +43,7 @@ try {
    catch (error) { return { error: String(error) }; }
  });
  if(updateCheck.error && /not allowed|denied|허용되지|not found/i.test(updateCheck.error))throw new Error('Updater IPC failed: '+updateCheck.error);
- await page.getByRole('button',{name:'v2.0.1',exact:true}).click();
+ await page.getByRole('button',{name:'v'+appVersion,exact:true}).click();
  await page.getByRole('dialog',{name:'앱 업데이트'}).waitFor();
  await page.screenshot({path:'test-results/desktop-update-dialog.png'});
  await page.getByRole('button',{name:'업데이트 창 닫기'}).click();
