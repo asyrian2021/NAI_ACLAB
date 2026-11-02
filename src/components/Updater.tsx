@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { Download, RefreshCw, X } from "lucide-react";
 
-import { version } from "../package.json";
+import { version } from "../../package.json";
 
 type Release = { current: string; version?: string; notes?: string };
 export function Updater({

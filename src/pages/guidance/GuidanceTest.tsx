@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FlaskConical, Maximize2, Minus, Plus, X } from "lucide-react";
-import type { AppState, GuidanceSettings, ImageItem, Job } from "./types";
-import { api } from "./api";
+import type { AppState, GuidanceSettings, ImageItem, Job } from "../../types";
+import { api } from "../../api";
 import { SweepImageViewer } from "./SweepImageViewer";
-import { SeedStatus } from "./SeedStatus";
+import { SeedStatus } from "../../components/SeedStatus";
 
 function axis(min: number, max: number, step: number, cap: number) {
   if (

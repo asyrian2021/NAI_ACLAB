@@ -266,7 +266,8 @@ def character_negative_prompt(common_prompt: str, preset: PromptPreset | None) -
 def random_artist_tags_for_state(state: AppState) -> list[dict]:
     result = []
     for category in state.categories:
-        tags = parse_artist_tags(category.tags)
+        disabled = set(parse_artist_tags(category.disabled_tags))
+        tags = [t for t in parse_artist_tags(category.tags) if t not in disabled]
         values = float_range(category.min_weight, category.max_weight, category.granule)
         count = len(tags) if category.all_artists else random.randint(min(category.min_picks, len(tags)), min(category.max_picks, len(tags)))
         for tag in random.sample(tags, count):

@@ -1,0 +1,17 @@
+/*
+ * Import order is the cascade order: tokens → base → shell → features → motion.
+ * Feature files may override base/shell rules but never each other.
+ */
+@import "./tokens.css";
+@import "./base.css";
+@import "./shell.css";
+@import "./studio.css";
+@import "./status-dock.css";
+@import "./seed.css";
+@import "./presets.css";
+@import "./artists.css";
+@import "./batting.css";
+@import "./guidance.css";
+@import "./settings.css";
+@import "./updater.css";
+@import "./motion.css";

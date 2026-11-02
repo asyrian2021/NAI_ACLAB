@@ -1,0 +1,84 @@
+/* Prompt presets page */
+.global-prompts {
+  padding: 22px;
+  background: var(--color-accent-surface-subtle);
+  border: 1px solid var(--color-accent-border-subtle);
+  border-radius: var(--radius-lg);
+  margin-bottom: 28px;
+}
+.global-prompts > .two-fields {
+  margin-top: 18px;
+}
+.global-prompts p {
+  margin-top: 5px;
+}
+.preset-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 30px;
+}
+.preset-list {
+  border-right: 1px solid var(--color-line);
+  padding-right: var(--space-5);
+}
+.preset-list h2 {
+  margin-bottom: 13px;
+}
+.preset-list button {
+  display: flex;
+  width: 100%;
+  justify-content: flex-start;
+  margin-bottom: 6px;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.preset-list .outline {
+  margin-top: 15px;
+}
+.preset-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.preset-editor > .outline {
+  align-self: flex-start;
+}
+.character-editor {
+  padding-top: 18px;
+  border-top: 1px solid var(--color-line);
+}
+.character-editor > .row {
+  margin-bottom: 13px;
+}
+
+@media (max-width: 1000px) {
+  .preset-layout {
+    grid-template-columns: 180px minmax(0, 1fr);
+    gap: var(--space-5);
+  }
+}
+@media (max-width: 760px) {
+  .preset-layout {
+    grid-template-columns: 1fr;
+  }
+  .preset-list {
+    border-right: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .preset-list h2 {
+    width: 100%;
+  }
+  .preset-list button {
+    width: auto;
+    margin: 0;
+  }
+  .preset-list .outline {
+    margin: 0;
+  }
+  .global-prompts {
+    padding: var(--space-4);
+  }
+}

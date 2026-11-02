@@ -16,6 +16,8 @@ class Category:
     min_picks: int | None = None
     max_picks: int | None = None
     all_artists: bool | None = None
+    # Registered tags that are kept in the list but skipped when drawing artists.
+    disabled_tags: list[str] = field(default_factory=list)
 
     def __post_init__(self):
         if self.min_picks is None:

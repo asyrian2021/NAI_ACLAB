@@ -111,6 +111,12 @@ class RandomTests(unittest.TestCase):
             self.assertEqual(len({a['tag'] for a in result}), 4)
         category.tags = ['artist:a', 'artist:b']
         self.assertEqual(len(artist_tags_for_prompt(state)), 2)
+        category.all_artists = True
+        category.disabled_tags = ['artist:b']
+        self.assertEqual([a['tag'] for a in artist_tags_for_prompt(state)], ['artist:a'])
+        category.disabled_tags = ['artist:a', 'artist:b']
+        self.assertEqual(artist_tags_for_prompt(state), [])
+        category.all_artists, category.disabled_tags = False, []
         category.tags = []
         self.assertEqual(artist_tags_for_prompt(state), [])
         category.min_picks, category.max_picks = 5, 3

@@ -1,6 +1,6 @@
 {
   "name": "nai-aclab",
-  "version": "2.0.8",
+  "version": "2.0.9",
   "private": true,
   "description": "NAI ACLAB desktop image studio",
   "license": "MIT",
@@ -16,7 +16,9 @@
     "desktop:dev": "npm run build && python scripts/build_sidecar.py && tauri dev",
     "desktop:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_desktop.ps1",
     "test": "python -m unittest discover -s tests",
-    "test:ui": "playwright test"
+    "test:ui": "playwright test",
+    "test:screens": "playwright test zz_screens",
+    "test:screens:update": "playwright test zz_screens --update-snapshots"
   },
   "files": [
     "app.py",

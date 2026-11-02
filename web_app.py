@@ -89,6 +89,7 @@ def save_incoming_state(data):
     validate_state(state)
     for category in state.categories:
         category.tags = parse_artist_tags(category.tags)
+        category.disabled_tags = [t for t in parse_artist_tags(category.disabled_tags) if t in category.tags]
     with STATE_LOCK:
         current = load_state()
         state.history = current.history

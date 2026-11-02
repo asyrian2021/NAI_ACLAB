@@ -1,0 +1,17 @@
+/* App update button and dialog */
+.update-available {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.update-dialog {
+  width: min(560px, 94vw);
+}
+.release-notes {
+  max-height: 35vh;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.update-download progress {
+  width: 100%;
+  accent-color: var(--color-accent);
+}

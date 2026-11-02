@@ -1,0 +1,14 @@
+/* Settings page */
+.settings-block {
+  max-width: 820px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+.settings-block details {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-line);
+}
+.settings-block .micro {
+  margin-top: 15px;
+}

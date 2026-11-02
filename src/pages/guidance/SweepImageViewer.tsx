@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, X } from "lucide-react";
-import type { ImageItem } from "./types";
+import { ZoomableImage } from "../../components/ZoomSurface";
+import type { ImageItem } from "../../types";
 
 type Props = {
   x: number;
@@ -88,22 +89,25 @@ export function SweepImageViewer(props: Props) {
           닫기 · Esc
         </button>
       </header>
-      <div className="sweep-image-stage">
-        {item?.error ? (
-          <div className="sweep-viewer-empty" role="status">
-            이 칸은 생성하지 못했습니다.<p>{item.error}</p>
-          </div>
-        ) : item ? (
-          <img
-            src={item.image_url}
-            alt={`확대 결과 · Guidance ${xValues[x]}, Rescale ${yValues[y]}`}
-          />
-        ) : (
-          <div className="sweep-viewer-empty" role="status">
-            아직 생성되지 않은 칸입니다.
-          </div>
-        )}
-      </div>
+      {item && !item.error ? (
+        <ZoomableImage
+          className="sweep-image-stage"
+          src={item.image_url}
+          alt={`확대 결과 · Guidance ${xValues[x]}, Rescale ${yValues[y]}`}
+        />
+      ) : (
+        <div className="sweep-image-stage">
+          {item?.error ? (
+            <div className="sweep-viewer-empty" role="status">
+              이 칸은 생성하지 못했습니다.<p>{item.error}</p>
+            </div>
+          ) : (
+            <div className="sweep-viewer-empty" role="status">
+              아직 생성되지 않은 칸입니다.
+            </div>
+          )}
+        </div>
+      )}
       <footer>
         <div className="sweep-viewer-values" aria-live="polite">
           <strong className="viewer-guidance">Guidance {xValues[x]}</strong>

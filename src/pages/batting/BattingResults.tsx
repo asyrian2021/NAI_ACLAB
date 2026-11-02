@@ -8,7 +8,8 @@ import {
   Maximize2,
   X,
 } from "lucide-react";
-import type { History, ImageItem, Job } from "./types";
+import { ZoomableImage } from "../../components/ZoomSurface";
+import type { History, ImageItem, Job } from "../../types";
 
 type Props = {
   history: History[];
@@ -332,7 +333,15 @@ export function BattingResults({ history, jobs, runId, selectRun }: Props) {
                 <X size={18} /> 닫기 · Esc
               </button>
             </header>
-            <div className="sweep-image-stage">{picture}</div>
+            {item && !item.error ? (
+              <ZoomableImage
+                className="sweep-image-stage"
+                src={item.image_url}
+                alt={`타율 테스트 결과 ${index + 1} · ${group?.name}`}
+              />
+            ) : (
+              <div className="sweep-image-stage">{picture}</div>
+            )}
             <footer>
               {values}
               {navigation}

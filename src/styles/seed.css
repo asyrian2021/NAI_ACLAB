@@ -1,0 +1,30 @@
+/* Generate-button row, seed lock badge and the fixed-seed confirmation dialog. */
+.generation-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.generation-action > button {
+  flex: 1;
+  min-width: 0;
+}
+.seed-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 36px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  color: var(--color-subtle);
+  cursor: help;
+}
+.seed-status.fixed {
+  color: var(--color-alert);
+  border-color: var(--color-alert-border);
+  background: var(--color-alert-tint);
+}
+.seed-confirmation strong {
+  color: var(--color-alert);
+}

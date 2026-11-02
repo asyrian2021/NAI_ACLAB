@@ -37,6 +37,14 @@ class ServerTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as c:self.request('/api/history/rate',{})
         self.assertEqual(c.exception.code,404)
 
+    def test_disabled_artist_tags_are_normalized_with_their_list(self):
+        state=self.request('/api/state')['state']
+        state['categories'][0]['tags']=['1.2::artist:a ::','artist:b','artist:c']
+        state['categories'][0]['disabled_tags']=['artist:b','artist:gone','0.9::artist:c']
+        saved=self.request('/api/state',{'state':state})['state']['categories'][0]
+        self.assertEqual(saved['tags'],['artist:a','artist:b','artist:c'])
+        self.assertEqual(saved['disabled_tags'],['artist:b','artist:c'])
+
     def test_generation_checkpoints_prompt_seed_and_media(self):
         state=self.request('/api/state')['state'];state['generation']['count']=2;state['api']['width']=64;state['api']['height']=64
         job=self.request('/api/generate',{'state':state})['job_id']

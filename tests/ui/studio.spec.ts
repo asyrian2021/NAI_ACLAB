@@ -48,6 +48,10 @@ test("unified presets, global prompts, random generation, comparison and persist
   ).toHaveValue("coastal train");
   await page.getByRole("button", { name: "작가", exact: true }).click();
   await page
+    .getByRole("button", { name: "텍스트로 편집", exact: true })
+    .first()
+    .click();
+  await page
     .getByRole("textbox", { name: "작가 태그", exact: true })
     .first()
     .fill("artist:sample_a\nartist:sample_b");
@@ -266,6 +270,9 @@ test("autosave, count ranges and studio seed controls", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "작가", exact: true }).click();
   const group = page.locator(".artist-editors > section").first();
+  await group
+    .getByRole("button", { name: "텍스트로 편집", exact: true })
+    .click();
   await group
     .getByRole("textbox", { name: "작가 태그", exact: true })
     .fill("artist:a\nartist:b\nartist:c\nartist:d\nartist:e");

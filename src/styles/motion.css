@@ -1,0 +1,421 @@
+/*
+ * Short responses to user actions; no continuous motion around the artwork.
+ * Loaded last so hover states here win over same-specificity component rules
+ * (for example `summary:hover` over `.prompt-section summary`).
+ */
+@media (prefers-reduced-motion: no-preference) {
+  button {
+    transition:
+      background-color 150ms ease,
+      color 150ms ease,
+      border-color 150ms ease,
+      box-shadow 150ms ease,
+      transform 120ms ease;
+  }
+  button:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+  button.primary:hover:not(:disabled) {
+    box-shadow: 0 3px 14px var(--color-accent-glow);
+    transform: translateY(-1px);
+  }
+  input,
+  select,
+  textarea {
+    transition:
+      border-color 160ms ease,
+      background-color 160ms ease;
+  }
+  .editor-page {
+    animation: page-arrive 200ms ease-out both;
+  }
+  .queue-panel,
+  .modal {
+    animation: panel-arrive 200ms ease-out both;
+  }
+  .modal-backdrop {
+    animation: surface-arrive 150ms ease-out;
+  }
+  .thumbnails .thumbnail-button {
+    animation: page-arrive 180ms ease-out;
+  }
+  .thumbnails .thumbnail-button:hover {
+    transform: translateY(-2px);
+  }
+  .prompt-section details[open] .prompt-text {
+    animation: page-arrive 180ms ease-out;
+  }
+  .scene-editor {
+    animation: page-arrive 180ms ease-out;
+  }
+  summary {
+    transition: color 150ms ease;
+  }
+  summary:hover {
+    color: var(--color-accent);
+  }
+}
+/*
+ * Eye candy added with the viewer/feedback round. Each effect plays once when
+ * something appears or changes state; nothing loops around the artwork except
+ * loading indicators.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  /* Menu highlight glides between items; the studio fades in on return. */
+  .nav-indicator {
+    transition:
+      transform var(--dur-base) var(--ease-out),
+      width var(--dur-base) var(--ease-out),
+      height var(--dur-base) var(--ease-out);
+  }
+  .app > .toolbar,
+  .app > .workspace,
+  .app > .filmstrip {
+    animation: surface-arrive 220ms ease-out;
+  }
+  .save-status.saving::before {
+    animation: pulse-dot 1s ease-in-out infinite;
+  }
+
+  /* Viewer: smooth zoom steps, fresh images develop in, grid cards cascade. */
+  .zoom-surface:not(.is-panning) [data-zoom-target] {
+    transition: transform 200ms var(--ease-out);
+  }
+  .stage:not(.grid) .image-well img {
+    animation: image-develop 320ms var(--ease-out);
+  }
+  .stage.grid .image-card {
+    animation: card-rise 320ms var(--ease-out) both;
+    animation-delay: calc(var(--i, 0) * 28ms);
+  }
+  .stage.grid .image-card:hover {
+    transform: translateY(-2px);
+    transition: transform var(--dur-fast) var(--ease-out);
+  }
+  .blend-well.slider .blend-top,
+  .blend-divider {
+    transition:
+      clip-path 60ms linear,
+      left 60ms linear;
+  }
+  .blend-well.overlay .blend-top {
+    transition: opacity var(--dur-fast) ease;
+  }
+  .blend-handle {
+    transition: transform var(--dur-fast) var(--ease-spring);
+  }
+  .blend-divider:hover .blend-handle,
+  .blend-divider:active .blend-handle {
+    transform: scale(1.15);
+  }
+  .zoom-readout,
+  .zoom-chip {
+    transition:
+      opacity var(--dur-base) ease,
+      color var(--dur-fast) ease,
+      background-color var(--dur-fast) ease;
+  }
+  .compare-modes {
+    animation: page-arrive 200ms var(--ease-out);
+  }
+
+  /* Feedback: favorites pop, the seed lock snaps, generate throws sparks. */
+  .favorite-toggle[aria-pressed="true"] svg {
+    animation: heart-pop 420ms var(--ease-spring);
+  }
+  .seed-status.fixed svg {
+    animation: lock-snap 360ms var(--ease-spring);
+  }
+  .sparkle-burst i {
+    animation: spark 620ms var(--ease-out) forwards;
+  }
+  .sparkle-burst i:nth-child(even) {
+    animation-duration: 760ms;
+    width: 4px;
+    height: 4px;
+  }
+
+  /* Filmstrip: new results land with a glow, pending slots shimmer. */
+  .thumbnails .thumbnail-button.is-new {
+    animation: thumb-land 520ms var(--ease-spring);
+  }
+  .thumbnails .thumbnail-button.is-new::after {
+    animation: pulse-dot 1.6s ease-in-out 3;
+  }
+  .thumbnail-placeholder {
+    animation: shimmer 1.4s linear infinite;
+  }
+  .thumbnail-placeholder.is-next svg {
+    animation: spin 1.5s linear infinite;
+  }
+  .new-images {
+    animation: badge-in 380ms var(--ease-spring);
+  }
+  .generation-pending {
+    animation: page-arrive 220ms var(--ease-out);
+  }
+
+  /* Notices, toasts and dialogs. */
+  .app > .notice {
+    animation: notice-drop 260ms var(--ease-out);
+  }
+  .app > .notice.error {
+    animation:
+      notice-drop 260ms var(--ease-out),
+      nudge 360ms 260ms ease-in-out;
+  }
+  .toast {
+    animation: toast-in 300ms var(--ease-spring);
+  }
+  .toast-timer {
+    animation-name: drain;
+    animation-timing-function: linear;
+    animation-fill-mode: forwards;
+  }
+  .toast:hover .toast-timer {
+    animation-play-state: paused;
+  }
+  .confirm-dialog[open] {
+    animation: panel-arrive 220ms var(--ease-out);
+  }
+  .confirm-dialog[open]::backdrop {
+    animation: surface-arrive 180ms ease-out;
+  }
+  .shortcut-groups dl > div {
+    animation: page-arrive 260ms var(--ease-out) both;
+  }
+
+  /* Status bar: a finished batch flashes once. */
+  .total-progress.complete .progress-track {
+    animation: track-glow 900ms ease-out;
+  }
+  .total-progress.has-error .progress-fill {
+    background: var(--color-danger);
+    transition: background-color var(--dur-base) ease;
+  }
+  .job {
+    animation: page-arrive 200ms var(--ease-out) both;
+  }
+
+  /* Editors: rows and cards slide in, switches glide. */
+  .tag-row {
+    animation: row-in 220ms var(--ease-out) both;
+    animation-delay: calc(var(--i, 0) * 12ms);
+  }
+  .switch span,
+  .switch span::after {
+    transition:
+      transform var(--dur-fast) var(--ease-spring),
+      background-color var(--dur-fast) ease;
+  }
+  .tag-issue {
+    animation: badge-in 260ms var(--ease-spring);
+  }
+  .artist-editor,
+  .character-editor,
+  .scene-editor {
+    animation: page-arrive 220ms var(--ease-out);
+  }
+  .artist-editor:focus-within,
+  .batting-settings:focus-within {
+    box-shadow: 0 0 0 1px var(--color-accent-border-subtle);
+    transition: box-shadow var(--dur-base) ease;
+  }
+  .weight-slider {
+    transition: filter var(--dur-fast) ease;
+  }
+  .weight-slider:active {
+    filter: drop-shadow(0 0 4px var(--color-glow));
+  }
+
+  /* First load: the wordmark shimmers while the workspace is prepared. */
+  .loading .wordmark {
+    background: linear-gradient(
+        100deg,
+        var(--color-text) 30%,
+        var(--color-accent) 50%,
+        var(--color-text) 70%
+      )
+      0 0 / 250% 100%;
+    background-clip: text;
+    color: transparent;
+    animation: shimmer 1.8s linear infinite;
+  }
+}
+@keyframes image-develop {
+  from {
+    opacity: 0;
+    filter: blur(8px) saturate(0.6);
+  }
+  to {
+    opacity: 1;
+    filter: none;
+  }
+}
+@keyframes card-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes heart-pop {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.45);
+  }
+  60% {
+    transform: scale(0.9);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes lock-snap {
+  0% {
+    transform: rotate(-18deg) scale(0.8);
+  }
+  100% {
+    transform: none;
+  }
+}
+@keyframes spark {
+  0% {
+    opacity: 1;
+    transform: rotate(var(--a)) translateX(10px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(var(--a)) translateX(46px) scale(0.3);
+  }
+}
+@keyframes thumb-land {
+  0% {
+    transform: translateY(8px) scale(0.85);
+    box-shadow: 0 0 0 0 var(--color-glow);
+  }
+  60% {
+    transform: translateY(-2px) scale(1.03);
+    box-shadow: 0 0 0 6px transparent;
+  }
+  100% {
+    transform: none;
+  }
+}
+@keyframes pulse-dot {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.75);
+  }
+}
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
+}
+@keyframes badge-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes notice-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes nudge {
+  25% {
+    transform: translateX(-4px);
+  }
+  50% {
+    transform: translateX(3px);
+  }
+  75% {
+    transform: translateX(-2px);
+  }
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes drain {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+@keyframes track-glow {
+  0% {
+    box-shadow: 0 0 0 0 var(--color-glow);
+  }
+  40% {
+    box-shadow: 0 0 10px 2px var(--color-glow);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes page-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes panel-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes surface-arrive {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

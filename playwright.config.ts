@@ -5,6 +5,9 @@ export default defineConfig({
   testDir: "./tests/ui",
   workers: 1,
   timeout: 45000,
+  // The app ships for Windows only, so baselines carry no platform suffix.
+  snapshotPathTemplate: "{testDir}/__screenshots__/{arg}{ext}",
+  expect: { toHaveScreenshot: { maxDiffPixelRatio: 0.002 } },
   use: {
     baseURL: `http://127.0.0.1:${port}`,
     channel: "msedge",

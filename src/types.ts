@@ -14,6 +14,8 @@ export type Category = {
   min_picks: number;
   max_picks: number;
   all_artists: boolean;
+  /** Registered but skipped when drawing artists. */
+  disabled_tags?: string[];
 };
 export type Character = { prompt: string; negative: string };
 export type Preset = {

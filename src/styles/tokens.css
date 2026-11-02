@@ -1,0 +1,95 @@
+/*
+ * Design tokens. Every color, type size, radius and shadow in the UI should
+ * come from here; component files must not introduce raw hex values.
+ */
+:root {
+  /* Typography */
+  --font-sans: Inter, "Segoe UI", "Malgun Gothic", sans-serif;
+  /* 2xs is for Latin/numeric labels only (eyebrow, kbd, counters).
+     Korean text never goes below xs: Malgun Gothic is hard to read under 12px. */
+  --fs-2xs: 11px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-2xl: 24px;
+  --lh-base: 1.5;
+  --lh-relaxed: 1.8;
+
+  /* Neutrals, darkest to lightest */
+  --color-canvas: #171819;
+  --color-bg: #202123;
+  --color-panel: #252729;
+  --color-raised: #282b2a;
+  --color-field: #2d3031;
+  --color-surface: #303234;
+  --color-line: #3a3c3e;
+  --color-line-strong: #454846;
+
+  /* Text */
+  --color-text: #e3e5e2;
+  --color-text-soft: #d6dcd7;
+  --color-text-secondary: #b6bcb8;
+  --color-muted: #a4aaa7;
+  --color-subtle: #969da1;
+
+  /* Accent (green) */
+  --color-accent: #b2d1bb;
+  --color-accent-hover: #c6dfcd;
+  --color-on-accent: #1c2b21;
+  --color-accent-text: #c6dbcc;
+  --color-accent-surface: #2c3930;
+  --color-accent-surface-subtle: #282e2a;
+  --color-accent-border: #4f6555;
+  --color-accent-border-subtle: #3d4b40;
+  --color-accent-tint: rgb(178 209 187 / 0.09);
+  --color-accent-glow: rgb(178 209 187 / 0.13);
+
+  /* Status */
+  --color-danger: #efa8a0;
+  --color-danger-surface: #472f2d;
+  --color-alert: #f48282;
+  --color-alert-border: rgb(244 130 130 / 0.33);
+  --color-alert-tint: rgb(244 130 130 / 0.06);
+  --color-amber: #f0c990;
+  --color-amber-surface: #403729;
+
+  /* Overlays */
+  --color-backdrop: rgb(0 0 0 / 0.64);
+  --color-scrim: rgb(0 0 0 / 0.73);
+  --color-on-scrim: #fff;
+  --color-label-scrim: rgb(32 39 34 / 0.87);
+  --color-shimmer: rgb(255 255 255 / 0.33);
+  --shadow-popover: 0 10px 30px rgb(0 0 0 / 0.53);
+  --shadow-dialog: 0 18px 70px rgb(0 0 0 / 0.56);
+
+  /* Shape */
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+
+  /* Spacing scale (4px base) for new and migrated rules */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Motion (used only inside prefers-reduced-motion: no-preference) */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 150ms;
+  --dur-base: 240ms;
+  --dur-slow: 420ms;
+  --color-danger-strong: #d9776c;
+  --color-glow: rgb(178 209 187 / 0.35);
+
+  /* Layout */
+  --header-height: 62px;
+  --control-height: 32px;
+}
