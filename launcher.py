@@ -5,9 +5,7 @@ import socket
 import subprocess
 import sys
 import webbrowser
-from http.server import ThreadingHTTPServer
-
-from web_app import Handler
+from web_app import EngineServer, Handler
 
 
 APP_NAME = "NAI Artist Combination Lab"
@@ -48,7 +46,7 @@ def open_browser(url: str) -> bool:
 
 def main() -> None:
     port = find_port()
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server = EngineServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}/"
 
     print(f"{APP_NAME} is running at {url}", flush=True)

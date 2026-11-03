@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import {
+  Compass,
   FlaskConical,
   Image,
   Layers,
@@ -17,6 +18,7 @@ const tabs: [Tab, string, LucideIcon][] = [
   ["artists", "작가", Palette],
   ["batting", "타율 테스트", FlaskConical],
   ["guidance", "가이던스 테스트", SlidersHorizontal],
+  ["explore", "탐색", Compass],
   ["settings", "설정", Settings],
 ];
 

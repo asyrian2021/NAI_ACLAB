@@ -5,20 +5,28 @@ import {
   ArrowUp,
   ChevronLeft,
   ChevronRight,
+  Compass,
   Maximize2,
   X,
 } from "lucide-react";
 import { ZoomableImage } from "../../components/ZoomSurface";
-import type { History, ImageItem, Job } from "../../types";
+import type { ExploreEntry, History, ImageItem, Job } from "../../types";
 
 type Props = {
   history: History[];
   jobs: Job[];
   runId: string;
   selectRun: (id: string) => void;
+  exploreFrom?: (entry: ExploreEntry) => void;
 };
 
-export function BattingResults({ history, jobs, runId, selectRun }: Props) {
+export function BattingResults({
+  history,
+  jobs,
+  runId,
+  selectRun,
+  exploreFrom,
+}: Props) {
   const runs = history.filter((h) => h.type === "batting_test");
   const run =
     runs.find((h) => h.id === runId) || (!runId ? runs[0] : undefined);
@@ -267,6 +275,19 @@ export function BattingResults({ history, jobs, runId, selectRun }: Props) {
           {values}
           {navigation}
         </div>
+        {exploreFrom && item && !!item.artists?.length && (
+          <button
+            className="outline batting-explore"
+            onClick={() =>
+              exploreFrom({
+                artists: structuredClone(item.artists),
+                preset: item.preset,
+              })
+            }
+          >
+            <Compass size={14} />이 조합으로 탐색
+          </button>
+        )}
       </div>
       <section className="batting-gallery" aria-label="생성 이미지 목록">
         <header className="batting-gallery-heading">

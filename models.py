@@ -69,11 +69,46 @@ class GenerationSettings:
 
 
 @dataclass
+class SceneSize:
+    image_size: str = "portrait"
+    count: int = 2
+
+
+@dataclass
 class BattingScene:
     name: str = ""
     preset: str = ""
-    image_size: str = "portrait"
-    count: int = 2
+    # A preset appears once; each row is an image size and how many images to make at it.
+    sizes: list[SceneSize] = field(default_factory=lambda: [SceneSize()])
+    # Picked from AppState.scene_tags.
+    tags: list[str] = field(default_factory=list)
+
+
+def batting_scenes_from(items) -> list[BattingScene]:
+    """Builds scenes, one per preset. Older data kept one size per scene and could list a
+    preset several times; those entries become size rows of one scene (same sizes add up)."""
+    scenes: dict[str, BattingScene] = {}
+    for item in items or []:
+        raw = item.get("sizes")
+        if isinstance(raw, list) and raw:
+            sizes = [construct(SceneSize, size) for size in raw]
+        else:
+            sizes = [construct(SceneSize, {k: item[k] for k in ("image_size", "count") if k in item})]
+        preset, tags = item.get("preset", ""), item.get("tags", [])
+        scene = scenes.get(preset)
+        if scene is None:
+            scenes[preset] = BattingScene(name=item.get("name", ""), preset=preset, sizes=sizes,
+                                          tags=list(tags) if isinstance(tags, list) else tags)
+            continue
+        for size in sizes:
+            same = next((s for s in scene.sizes if s.image_size == size.image_size), None)
+            if same is None:
+                scene.sizes.append(size)
+            elif type(same.count) is int and type(size.count) is int:
+                same.count = min(200, same.count + size.count)
+        if isinstance(tags, list) and isinstance(scene.tags, list):
+            scene.tags += [t for t in tags if t not in scene.tags]
+    return list(scenes.values())
 
 
 @dataclass
@@ -97,6 +132,8 @@ class AppState:
     api: ApiSettings = field(default_factory=ApiSettings)
     generation: GenerationSettings = field(default_factory=GenerationSettings)
     batting_scenes: list[BattingScene] = field(default_factory=list)
+    # Scene tags defined once beside the batting scenes; each scene picks from them.
+    scene_tags: list[str] = field(default_factory=list)
     history: list[dict] = field(default_factory=list)
     guidance_test: GuidanceTestSettings = field(default_factory=GuidanceTestSettings)
 
@@ -203,10 +240,18 @@ def state_from_dict(raw: dict) -> AppState:
         prompt_presets=presets, quality_prompt=data.get("quality_prompt", ""),
         negative_prompt=data.get("negative_prompt", ""), api=construct(ApiSettings, data.get("api")),
         generation=construct(GenerationSettings, data.get("generation")),
-        batting_scenes=[construct(BattingScene, s) for s in data.get("batting_scenes", [])],
+        batting_scenes=batting_scenes_from(data.get("batting_scenes", [])),
         history=data.get("history", []),
         guidance_test=construct(GuidanceTestSettings, data.get("guidance_test")),
     )
+    # Every tag a scene uses is a defined tag, also for data saved before the list existed.
+    clean = lambda tags: [t.strip() if isinstance(t, str) else t for t in tags]
+    for scene in state.batting_scenes:
+        if isinstance(scene.tags, list):
+            scene.tags = clean(scene.tags)
+    defined = data.get("scene_tags") if isinstance(data.get("scene_tags"), list) else []
+    used = [t for s in state.batting_scenes if isinstance(s.tags, list) for t in s.tags]
+    state.scene_tags = list(dict.fromkeys(clean(defined) + used))
     return state
 
 
@@ -233,5 +278,14 @@ def validate_state(state: AppState):
         if not math.isfinite(float(item.get("weight", 1))) or not 0 <= float(item.get("weight", 1)) <= 10:
             raise ValueError("고정 가중치는 0~10이어야 합니다.")
     for scene in state.batting_scenes:
-        if scene.preset not in names or type(scene.count) is not int or not 1 <= scene.count <= 200:
-            raise ValueError("타율 테스트의 프리셋과 생성 매수를 확인하세요.")
+        if scene.preset not in names:
+            raise ValueError("타율 테스트의 프리셋을 확인하세요.")
+        if not scene.sizes or any(type(s.image_size) is not str or type(s.count) is not int or not 1 <= s.count <= 200
+                                  for s in scene.sizes):
+            raise ValueError("타율 테스트의 생성 매수는 1~200장이어야 합니다.")
+        if len({s.image_size for s in scene.sizes}) != len(scene.sizes):
+            raise ValueError("한 프리셋에서 같은 이미지 크기는 한 번만 추가할 수 있습니다.")
+        if not isinstance(scene.tags, list) or len(scene.tags) != len(set(scene.tags)):
+            raise ValueError("장면 태그를 확인하세요.")
+    if any(type(t) is not str or not t.strip() or len(t) > 40 for t in state.scene_tags):
+        raise ValueError("장면 태그는 1~40자의 문자열이어야 합니다.")

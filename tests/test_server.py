@@ -15,7 +15,7 @@ import web_app as web
 class ServerTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1] / '.test-data');root=Path(self.temp.name)
-        self.p1=patch.multiple(app,DATA_DIR=root,OUTPUT_DIR=root/'outputs',STATE_PATH=root/'app_state.json',TOKEN_SECRET_PATH=root/'token')
+        self.p1=patch.multiple(app,DATA_DIR=root,OUTPUT_DIR=root/'outputs',EXPLORE_DIR=root/'explore',STATE_PATH=root/'app_state.json',TOKEN_SECRET_PATH=root/'token')
         self.p2=patch.multiple(web,OUTPUT_DIR=root/'outputs',STATE_PATH=root/'app_state.json')
         self.p1.start();self.p2.start()
         web.JOBS.clear()
@@ -36,6 +36,44 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(c.exception.code,403)
         with self.assertRaises(urllib.error.HTTPError) as c:self.request('/api/history/rate',{})
         self.assertEqual(c.exception.code,404)
+
+    def test_scene_tags_are_a_shared_list_covering_every_scene(self):
+        state=self.request('/api/state')['state']
+        self.assertEqual(state['scene_tags'],[])
+        preset=state['generation']['preset']
+        state['scene_tags']=['전신',' 발 보임 ']
+        state['batting_scenes']=[{'name':'','preset':preset,'image_size':'portrait','count':1,'tags':['발 보임']},
+                                 {'name':'','preset':preset,'image_size':'portrait','count':1,'tags':['손']}]
+        saved=self.request('/api/state',{'state':state})['state']
+        # Tags used by scenes but missing from the list (older data) are kept as defined tags.
+        self.assertEqual(saved['scene_tags'],['전신','발 보임','손'])
+        state['scene_tags']=['x'*41]
+        with self.assertRaises(urllib.error.HTTPError):self.request('/api/state',{'state':state})
+
+    def test_batting_scene_per_preset_with_size_rows(self):
+        state=self.request('/api/state')['state']
+        preset=state['generation']['preset']
+        # Older data: the same preset listed several times, one size each.
+        state['batting_scenes']=[{'name':'','preset':preset,'image_size':'portrait','count':1,'tags':['a']},
+                                 {'name':'','preset':preset,'image_size':'landscape','count':2,'tags':['b']},
+                                 {'name':'','preset':preset,'image_size':'portrait','count':1}]
+        saved=self.request('/api/state',{'state':state})['state']['batting_scenes']
+        self.assertEqual(len(saved),1)
+        self.assertEqual(saved[0]['sizes'],[{'image_size':'portrait','count':2},{'image_size':'landscape','count':2}])
+        self.assertEqual(saved[0]['tags'],['a','b'])
+        bad=dict(saved[0],sizes=[{'image_size':'square','count':1},{'image_size':'square','count':1}])
+        state['batting_scenes']=[bad]
+        with self.assertRaises(urllib.error.HTTPError) as e:self.request('/api/state',{'state':state})
+        self.assertEqual(e.exception.code,400)
+        state['batting_scenes']=saved
+        sizes=[]
+        def capture(client,prompt,negative,path):
+            sizes.append((client.settings.width,client.settings.height));path.write_bytes(b'\x89PNG')
+        with patch.object(app.NovelAIClient,'generate',capture):
+            job=self.request('/api/batting/generate',{'state':state})['job_id']
+            web.WORK.join()
+        self.assertEqual(web.JOBS[job]['total'],4)
+        self.assertEqual(sizes,[(832,1216)]*2+[(1216,832)]*2)
 
     def test_disabled_artist_tags_are_normalized_with_their_list(self):
         state=self.request('/api/state')['state']
@@ -171,6 +209,96 @@ class ServerTests(unittest.TestCase):
         self.assertTrue(any(j['id']=='active-old' for j in result))
         self.assertFalse(any(j['id']=='old-0' for j in result))
         self.assertEqual(self.request('/api/state')['state']['history'],[])
+
+    def explore_state(self):
+        state=self.request('/api/state')['state']
+        state['api'].update(width=64,height=64,seed=-1,mock_mode=True)
+        state['categories']=[
+            {'name':'메인','tags':[f'artist:m{i}' for i in range(8)],'min_weight':1,'max_weight':1.3,'granule':.05,'picks':0,'min_picks':2,'max_picks':3,'all_artists':False},
+            {'name':'신체','tags':[f'artist:b{i}' for i in range(6)],'min_weight':.5,'max_weight':.8,'granule':.1,'picks':0,'min_picks':1,'max_picks':2,'all_artists':False}]
+        state['batting_scenes']=[{'name':'','preset':state['generation']['preset'],'image_size':'square','count':1,'tags':['feet']}]
+        return self.request('/api/state',{'state':state})['state']
+
+    def test_explore_generation_runs_with_shared_seeds_and_fixed_order(self):
+        state=self.explore_state()
+        frozen=self.request('/api/explore/baseline',{'plan':[{'group':'메인','mode':'pick'},{'group':'신체','mode':'rate'}]})['frozen']
+        self.assertEqual(list(frozen),['신체'])
+        c=self.request('/api/explore/create',{'name':'테스트','plan':[{'group':'메인','mode':'pick'},{'group':'신체','mode':'rate'}],'preset':state['generation']['preset'],'image_size':'landscape','frozen':frozen})['campaign']
+        self.assertEqual(c['frozen']['신체'],frozen['신체'])
+        prompts=[]
+        original=app.NovelAIClient.generate
+        def capture(client,prompt,negative,path):
+            prompts.append((prompt,client.settings.seed));original(client,prompt,negative,path)
+        with patch.object(app.NovelAIClient,'generate',capture):
+            job=self.request('/api/explore/run',{'id':c['id']})['job_id']
+            with self.assertRaises(urllib.error.HTTPError):self.request('/api/explore/run',{'id':c['id']})
+            web.WORK.join()
+        self.assertEqual(web.JOBS[job]['status'],'done')
+        self.assertTrue(web.JOBS[job]['name'].startswith('탐색 · 테스트 · 1단계 0세대'))
+        c=self.request('/api/explore/'+c['id'])['campaign']
+        gen=c['generations'][0]
+        self.assertEqual(len(c['trials']),12);self.assertEqual(gen['status'],'awaiting_pick')
+        self.assertEqual([t['seed'] for t in c['trials']],[gen['seeds'][0]]*6+[gen['seeds'][1]]*6)
+        self.assertEqual([seed for _,seed in prompts],[t['seed'] for t in c['trials']])
+        for (prompt,_),trial in zip(prompts,c['trials']):
+            genes=c['genomes'][trial['genome_id']]['genes']
+            self.assertIn(', '.join(app.weight_tag(g['tag'],g['weight']) for g in genes),prompt)
+        with urllib.request.urlopen(self.url+c['trials'][0]['image_url']) as r:self.assertTrue(r.read().startswith(b'\x89PNG'))
+        history=self.request('/api/state')['state']['history'][0]
+        # Pick-stage images use the campaign's size, not the studio's (64×64 here).
+        self.assertEqual({(i['width'],i['height']) for i in history['items']},{(1216,832)})
+        self.assertEqual(history['type'],'explore');self.assertEqual(history['items'][0]['trial_id'],c['trials'][0]['id'])
+        c=self.request('/api/explore/pick',{'id':c['id'],'generation':0,'picks':gen['genome_ids'][:2]})['campaign']
+        self.assertEqual(c['generations'][1]['genome_ids'][:2],gen['genome_ids'][:2])
+        self.assertEqual(c['info']['pending'],12)
+        listing=self.request('/api/explore')['campaigns']
+        self.assertEqual((listing[0]['id'],listing[0]['progress']),(c['id'],'1세대'))
+        c=self.request('/api/explore/advance',{'id':c['id'],'champion_id':gen['genome_ids'][0]})['campaign']
+        self.assertEqual(c['stage'],'s1');self.assertEqual(len(c['rounds'][0]['genome_ids']),8)
+        self.request('/api/explore/delete',{'id':c['id']})
+        self.assertEqual(self.request('/api/explore')['campaigns'],[])
+
+    def test_explore_cancel_then_run_generates_only_missing(self):
+        import explore
+        state=self.explore_state()
+        with self.assertRaises(urllib.error.HTTPError) as e:self.request('/api/explore/create',{'plan':[{'group':'메인','mode':'pick'}],'preset':state['generation']['preset']})
+        self.assertEqual(e.exception.code,400)  # No image size chosen.
+        c=self.request('/api/explore/create',{'plan':[{'group':'메인','mode':'pick'}],'preset':state['generation']['preset'],'image_size':'square'})['campaign']
+        job='explore-cancel-test'
+        web.JOBS[job]={'id':job,'status':'queued','progress':0,'total':12,'campaign_id':c['id']}
+        def cancel_after_three(client,prompt,negative,path):
+            path.write_bytes(b'\x89PNG')
+            if web.JOBS[job]['progress']>=2:web.update_job(job,cancel_requested=True)
+        with web.EXPLORE_LOCK:tasks=explore.pending_tasks(explore.load_campaign(c['id']))
+        with patch.object(app.NovelAIClient,'generate',cancel_after_three):web.run_job(job,app.load_state(),explore=(c['id'],tasks))
+        self.assertEqual(web.JOBS[job]['status'],'cancelled')
+        c=self.request('/api/explore/'+c['id'])['campaign']
+        self.assertEqual((len(c['trials']),c['info']['pending']),(3,9))
+        with self.assertRaises(urllib.error.HTTPError) as e:self.request('/api/explore/pick',{'id':c['id'],'generation':0,'picks':[]})
+        self.assertEqual(e.exception.code,400)
+        second=self.request('/api/explore/run',{'id':c['id']})['job_id'];web.WORK.join()
+        self.assertEqual(web.JOBS[second]['total'],9)
+        c=self.request('/api/explore/'+c['id'])['campaign']
+        self.assertEqual((len(c['trials']),c['info']['pending']),(12,0))
+        self.assertEqual(len({(t['genome_id'],t['seed']) for t in c['trials']}),12)
+        with self.assertRaises(urllib.error.HTTPError) as e:self.request('/api/explore/..%2Fapp_state')
+        self.assertIn(e.exception.code,{400,404})
+
+    def test_explore_labels_and_rounds(self):
+        state=self.explore_state()
+        c=self.request('/api/explore/create',{'plan':[{'group':'메인','mode':'pick'},{'group':'신체','mode':'rate'}],'preset':state['generation']['preset'],'image_size':'square'})['campaign']
+        c=self.request('/api/explore/advance',{'id':c['id'],'champion_id':c['generations'][0]['genome_ids'][0]})['campaign']
+        self.request('/api/explore/run',{'id':c['id']});web.WORK.join()
+        c=self.request('/api/explore/'+c['id'])['campaign']
+        self.assertEqual(len(c['trials']),16)
+        trial=c['trials'][0]
+        c=self.request('/api/explore/label',{'id':c['id'],'trial_id':trial['id'],'failures':['anatomy']})['campaign']
+        stats=c['info']['stats']['s1'][trial['genome_id']]
+        self.assertEqual((stats['s'],stats['n'],stats['reasons']['anatomy']),(1,2,1))
+        result=self.request('/api/explore/close-round',{'id':c['id']})
+        self.assertEqual(result['round'],{'next_round':1})
+        self.assertNotIn(trial['genome_id'],result['campaign']['rounds'][0]['survivors'])
+        self.assertEqual(len(result['campaign']['rounds'][1]['seeds']),4)
 
     def test_media_traversal_is_rejected(self):
         self.assertIsNone(web.safe_child_path(web.OUTPUT_DIR,'../secret'))

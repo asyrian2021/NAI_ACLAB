@@ -15,11 +15,12 @@ import type { Tab } from "./lib/actions";
 import { isActiveJob } from "./lib/helpers";
 import { ArtistsPage } from "./pages/ArtistsPage";
 import { BattingPage } from "./pages/batting/BattingPage";
+import { ExplorePage } from "./pages/explore/ExplorePage";
 import { GuidanceTest } from "./pages/guidance/GuidanceTest";
 import { PresetsPage } from "./pages/PresetsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { StudioPage } from "./pages/studio/StudioPage";
-import type { AppState, Job, Preview } from "./types";
+import type { AppState, ExploreEntry, Job, Preview } from "./types";
 
 const QUEUE_PANEL_MS = 3000;
 
@@ -29,6 +30,8 @@ export function App() {
   const [editPreset, setEditPreset] = useState(0);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [battingRunId, setBattingRunId] = useState("");
+  const [exploreEntry, setExploreEntry] = useState<ExploreEntry | null>(null);
+  const [exploreId, setExploreId] = useState("");
   const [confirmBattingSeed, setConfirmBattingSeed] = useState<number | null>(
     null,
   );
@@ -222,11 +225,18 @@ export function App() {
           copy={copy}
           setMessage={setMessage}
           refreshHistory={refreshHistory}
+          exploreFrom={(entry) => {
+            setExploreEntry(entry);
+            setExploreId("");
+            setTab("explore");
+          }}
         />
       ) : (
         <main
           className={
-            "editor-page" + (tab === "guidance" ? " guidance-page" : "")
+            "editor-page" +
+            (tab === "guidance" ? " guidance-page" : "") +
+            (tab === "explore" ? " explore-page" : "")
           }
           key={tab}
         >
@@ -254,6 +264,11 @@ export function App() {
                 if (state.api.seed >= 0) setConfirmBattingSeed(state.api.seed);
                 else void task(() => generate(true));
               }}
+              exploreFrom={(entry) => {
+                setExploreEntry(entry);
+                setExploreId("");
+                setTab("explore");
+              }}
             />
           )}
           {tab === "guidance" && (
@@ -263,6 +278,27 @@ export function App() {
               busy={busy}
               edit={edit}
               start={startGuidance}
+            />
+          )}
+          {tab === "explore" && (
+            <ExplorePage
+              state={state}
+              edit={edit}
+              jobs={jobs}
+              busy={busy}
+              task={task}
+              persist={persist}
+              queued={(id) => {
+                trackJob(id);
+                showQueue();
+                setMessage("탐색 이미지를 대기열에 추가했습니다.");
+              }}
+              setTab={setTab}
+              setMessage={setMessage}
+              entry={exploreEntry}
+              clearEntry={() => setExploreEntry(null)}
+              openId={exploreId}
+              setOpenId={setExploreId}
             />
           )}
           {tab === "settings" && <SettingsPage state={state} edit={edit} />}

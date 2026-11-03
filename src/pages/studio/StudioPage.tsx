@@ -12,7 +12,7 @@ import { api } from "../../api";
 import { ShortcutHelp } from "../../components/ShortcutHelp";
 import type { StudioViewState, ViewMode } from "../../hooks/useStudioView";
 import type { Edit, Tab, Task } from "../../lib/actions";
-import type { AppState, Job } from "../../types";
+import type { AppState, ExploreEntry, Job } from "../../types";
 import { Filmstrip } from "./Filmstrip";
 import { GenerationPanel } from "./GenerationPanel";
 import { ImageDetails } from "./ImageDetails";
@@ -44,6 +44,7 @@ export function StudioPage({
   copy,
   setMessage,
   refreshHistory,
+  exploreFrom,
 }: {
   state: AppState;
   studio: StudioViewState;
@@ -58,6 +59,7 @@ export function StudioPage({
   copy: (text: string) => Promise<void>;
   setMessage: (text: string) => void;
   refreshHistory: () => Promise<void>;
+  exploreFrom: (entry: ExploreEntry) => void;
 }) {
   const {
     view,
@@ -198,6 +200,7 @@ export function StudioPage({
           copy={copy}
           setMessage={setMessage}
           toggleFavorite={toggleFavorite}
+          exploreFrom={exploreFrom}
         />
       </div>
       <Filmstrip

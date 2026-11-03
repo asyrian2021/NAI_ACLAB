@@ -1,7 +1,13 @@
 import type { AppState } from "../types";
 
 export type Tab =
-  "studio" | "presets" | "artists" | "batting" | "guidance" | "settings";
+  | "studio"
+  | "presets"
+  | "artists"
+  | "batting"
+  | "guidance"
+  | "explore"
+  | "settings";
 
 /** Applies a mutation to a cloned draft and schedules an autosave. */
 export type Edit = (fn: (s: AppState) => void) => void;

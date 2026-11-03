@@ -1,4 +1,5 @@
 import {
+  Compass,
   Copy,
   CornerUpLeft,
   FlaskConical,
@@ -10,7 +11,7 @@ import {
 import { api } from "../../api";
 import type { StudioViewState } from "../../hooks/useStudioView";
 import type { Edit, Tab, Task } from "../../lib/actions";
-import type { AppState } from "../../types";
+import type { AppState, ExploreEntry } from "../../types";
 
 /** Right studio panel: the selected image's recipe, seed and follow-up actions. */
 export function ImageDetails({
@@ -22,6 +23,7 @@ export function ImageDetails({
   copy,
   setMessage,
   toggleFavorite,
+  exploreFrom,
 }: {
   state: AppState;
   studio: StudioViewState;
@@ -31,6 +33,7 @@ export function ImageDetails({
   copy: (text: string) => Promise<void>;
   setMessage: (text: string) => void;
   toggleFavorite: () => Promise<void>;
+  exploreFrom: (entry: ExploreEntry) => void;
 }) {
   const { current, reference, view, setFocus } = studio;
 
@@ -225,6 +228,19 @@ export function ImageDetails({
         )}
         <button className="outline full" onClick={reuse}>
           <CornerUpLeft size={14} />이 조합으로 이어서
+        </button>
+        <button
+          className="outline full"
+          disabled={!current.artists?.length}
+          onClick={() => {
+            setFocus(false);
+            exploreFrom({
+              artists: structuredClone(current.artists || []),
+              preset: current.preset,
+            });
+          }}
+        >
+          <Compass size={14} />이 조합으로 탐색
         </button>
       </section>
       <section className="prompt-section">

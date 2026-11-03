@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import random
 import secrets
 import subprocess
 import sys
@@ -22,10 +23,13 @@ from app import (APP_DIR, OUTPUT_DIR, STATE_PATH, NovelAIClient, AppState, Promp
                  parse_artist_tags, safe_path_name, sanitize_history_entry)
 from models import state_from_dict, validate_state
 from guidance import SETTING_KEYS, grid_values
+import app as engine
+import explore
 
 WEB_DIR = APP_DIR / "web"
 LOCAL_API_TOKEN = secrets.token_urlsafe(32)
 STATE_LOCK = threading.RLock()
+EXPLORE_LOCK = threading.RLock()
 JOBS_LOCK = threading.RLock()
 JOBS: dict[str, dict] = {}
 COMPLETED_JOB_LIMIT = 50
@@ -101,13 +105,15 @@ def save_incoming_state(data):
     return state
 
 
-def scene_state(state, scene):
+def scene_state(state, scene, size=None):
+    """The state for one size row of a batting scene (the first row when none is given)."""
+    size = size or scene.sizes[0]
     current = deepcopy(state)
     current.generation.preset = scene.preset
-    current.generation.count = scene.count
-    current.generation.image_size = scene.image_size
-    if scene.image_size in IMAGE_SIZE_DIMENSIONS:
-        current.api.width, current.api.height = IMAGE_SIZE_DIMENSIONS[scene.image_size]
+    current.generation.count = size.count
+    current.generation.image_size = size.image_size
+    if size.image_size in IMAGE_SIZE_DIMENSIONS:
+        current.api.width, current.api.height = IMAGE_SIZE_DIMENSIONS[size.image_size]
     return current
 
 
@@ -130,8 +136,78 @@ def cancelled(job_id):
         return JOBS[job_id].get("cancel_requested", False)
 
 
-def run_job(job_id, state, batting=False, sweep=None):
-    scenes = [(s.preset, scene_state(state, s)) for s in state.batting_scenes] if batting else [(state.generation.preset, state)]
+def explore_cell(state, task, campaign):
+    """The state one search image is generated from: the campaign preset, or the round's scene."""
+    scene = next((s for s in state.batting_scenes if s.preset == task["scene"]), None)
+    if task.get("kind") == "evolve" or scene is None:
+        cell = deepcopy(state)
+        cell.generation.preset = task["scene"]
+        if task.get("kind") == "evolve" and campaign.image_size in IMAGE_SIZE_DIMENSIONS:
+            cell.generation.image_size = campaign.image_size
+            cell.api.width, cell.api.height = IMAGE_SIZE_DIMENSIONS[campaign.image_size]
+    else:
+        cell = scene_state(state, scene)
+    cell.generation.count = 1
+    return cell
+
+
+def run_explore(job_id, state, campaign_id, tasks):
+    with EXPLORE_LOCK:
+        campaign = explore.load_campaign(campaign_id)
+    history = {"id": job_id, "type": "explore", "preset": campaign.preset, "campaign_id": campaign_id,
+               "created_at": time.strftime("%Y-%m-%d %H:%M:%S"), "output_dir": job_id, "items": []}
+    out_dir = OUTPUT_DIR / job_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    progress, failures = 0, 0
+    update_job(job_id, status="running")
+    for task in tasks:
+        if cancelled(job_id):
+            break
+        genome = campaign.genomes[task["genome_id"]]
+        current = explore_cell(state, task, campaign)
+        # Genes keep their stored order: no shuffle while searching.
+        prompt, negative, artists = build_prompt(current, artists_override=engine.genes_to_artists(genome.genes))
+        path = out_dir / f"image_{progress + 1:04}.png"
+        settings = deepcopy(current.api)
+        settings.seed = task["seed"]
+        trial_id = uuid.uuid4().hex[:12]
+        item = {"path": output_ref(str(path)), "artists": artists, "prompt": prompt, "negative_prompt": negative,
+                "preset": current.generation.preset, "scene_name": task["scene"], "seed": settings.seed,
+                "width": settings.width, "height": settings.height, "mock": settings.mock_mode,
+                "created_at": time.strftime("%Y-%m-%d %H:%M:%S"), "campaign_id": campaign_id,
+                "genome_id": genome.id, "trial_id": trial_id}
+        item['generation_settings'] = {key: getattr(settings, key) for key in SETTING_KEYS}
+        item['scale'], item['guidance_rescale'] = settings.scale, settings.guidance_rescale
+        try:
+            NovelAIClient(settings).generate(prompt, negative, path)
+        except Exception as exc:
+            item["error"] = str(exc)
+            failures += 1
+        history["items"].append(item)
+        progress += 1
+        with STATE_LOCK:
+            latest = load_state()
+            latest.history = [h for h in latest.history if h["id"] != job_id]
+            latest.history.insert(0, deepcopy(history))
+            save_state(latest)
+        with EXPLORE_LOCK:
+            try:
+                latest_campaign = explore.load_campaign(campaign_id)
+            except FileNotFoundError:
+                update_job(job_id, cancel_requested=True)
+            else:
+                explore.record_trial(latest_campaign, task, "" if item.get("error") else item["path"], job_id,
+                                     item.get("error", ""), trial_id)
+                explore.save_campaign(latest_campaign)
+        update_job(job_id, progress=progress, failures=failures, last_error=item.get("error", ""))
+    update_job(job_id, status="cancelled" if cancelled(job_id) else "failed" if failures else "done")
+
+
+def run_job(job_id, state, batting=False, sweep=None, explore=None):
+    if explore:
+        return run_explore(job_id, state, *explore)
+    scenes = ([(s.preset, scene_state(state, s, size)) for s in state.batting_scenes for size in s.sizes]
+              if batting else [(state.generation.preset, state)])
     history = {"id": job_id, "type": "batting_test" if batting else "generation", "preset": state.generation.preset,
                "created_at": time.strftime("%Y-%m-%d %H:%M:%S"), "output_dir": job_id, "items": []}
     if sweep:
@@ -196,10 +272,10 @@ def run_job(job_id, state, batting=False, sweep=None):
 
 def worker_loop():
     while True:
-        job_id, state, batting, sweep = WORK.get()
+        job_id, state, batting, sweep, search = WORK.get()
         try:
             if not cancelled(job_id):
-                run_job(job_id, state, batting, sweep)
+                run_job(job_id, state, batting, sweep, search)
             else:
                 update_job(job_id, status="cancelled")
         except Exception as exc:
@@ -208,27 +284,31 @@ def worker_loop():
             WORK.task_done()
 
 
-def enqueue(state, batting=False, sweep=None):
+def enqueue(state, batting=False, sweep=None, explore=None, name=""):
     global WORKER
     if not state.api.mock_mode and not state.api.token:
         raise ValueError("API 토큰을 입력하거나 체험 모드를 켜세요.")
     if batting and not state.batting_scenes:
         raise ValueError("타율 테스트에 사용할 씬을 추가하세요.")
-    if not batting and not sweep and not selected_preset(state):
+    if not batting and not sweep and not explore and not selected_preset(state):
         raise ValueError("프롬프트 프리셋을 선택하세요.")
     job_id = time.strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:8]
-    total = sum(s.count for s in state.batting_scenes) if batting else state.generation.count
+    total = sum(size.count for s in state.batting_scenes for size in s.sizes) if batting else state.generation.count
     if sweep:
         total = len(sweep[1]) * len(sweep[2])
+    if explore:
+        total = len(explore[1])
     with JOBS_LOCK:
         if sum(j["status"] in {"queued", "running", "cancelling"} for j in JOBS.values()) >= 20:
             raise ValueError("대기열은 최대 20개까지 추가할 수 있습니다.")
-        JOBS[job_id] = {"id": job_id, "name": "가이던스 테스트" if sweep else "타율 테스트" if batting else state.generation.preset,
+        JOBS[job_id] = {"id": job_id, "name": name or ("가이던스 테스트" if sweep else "타율 테스트" if batting else state.generation.preset),
                         "status": "queued", "progress": 0, "total": total}
+        if explore:
+            JOBS[job_id]["campaign_id"] = explore[0]
         if WORKER is None or not WORKER.is_alive():
             WORKER = threading.Thread(target=worker_loop, daemon=True)
             WORKER.start()
-        WORK.put((job_id, deepcopy(state), batting, deepcopy(sweep)))
+        WORK.put((job_id, deepcopy(state), batting, deepcopy(sweep), deepcopy(explore)))
     return job_id
 
 
@@ -250,6 +330,86 @@ def prepare_guidance(state):
     current.api.width, current.api.height = source['width'], source['height']
     validate_state(current)
     return current, (deepcopy(source), x_values, y_values, 'recorded' if recorded else 'current')
+
+
+def campaign_jobs(campaign_id):
+    with JOBS_LOCK:
+        return [j for j in JOBS.values() if j.get("campaign_id") == campaign_id and j["status"] in {"queued", "running", "cancelling"}]
+
+
+def stop_campaign_jobs(campaign_id):
+    with JOBS_LOCK:
+        for job in campaign_jobs(campaign_id):
+            job['cancel_requested'] = True
+            job['status'] = 'cancelled' if job['status'] == 'queued' else 'cancelling'
+
+
+def campaign_payload(c, state):
+    data = explore.campaign_to_dict(c)
+    for trial in data["trials"]:
+        trial["image_url"] = media_url(trial["image_path"]) if trial["image_path"] else ""
+    data["info"] = explore.campaign_info(c, state)
+    active = campaign_jobs(c.id)
+    data["info"]["job_id"] = active[-1]["id"] if active else ""
+    return data
+
+
+def explore_post(route, data):
+    """Search-campaign actions. Each loads the campaign, changes it and saves it under EXPLORE_LOCK."""
+    with STATE_LOCK:
+        state = load_state()
+    if route == '/api/explore/baseline':
+        return {"frozen": explore.baseline(state, data.get('plan') or [], data.get('start_genes'))}
+    if route == '/api/explore/create':
+        plan = data.get('plan') or []
+        image_size = str(data.get('image_size') or '')
+        # The form makes the user choose; nothing is assumed for a new campaign.
+        if any(isinstance(p, dict) and p.get('mode') == 'pick' for p in plan) and not image_size:
+            raise ValueError('고르기 단계의 이미지 크기를 고르세요.')
+        c = explore.create_campaign(state, str(data.get('name', '')), plan, str(data.get('preset', '')),
+                                    data.get('frozen'), data.get('start_genes'), data.get('params'), image_size=image_size)
+        with EXPLORE_LOCK:
+            explore.save_campaign(c)
+        return {"campaign": campaign_payload(c, state)}
+    rng = random.Random()
+    with EXPLORE_LOCK:
+        c = explore.load_campaign(str(data.get('id', '')))
+        result = {}
+        if route == '/api/explore/delete':
+            stop_campaign_jobs(c.id)
+            explore.delete_campaign(c.id)
+            return {"ok": True}
+        if route == '/api/explore/run':
+            if campaign_jobs(c.id):
+                raise ValueError('이 캠페인의 생성이 이미 진행 중입니다.')
+            tasks = explore.pending_tasks(c)
+            if not tasks:
+                raise ValueError('새로 생성할 이미지가 없습니다.')
+            name = f"탐색 · {c.name} · {explore.stage_info(c)['name'].split(' · ')[0]} {explore.progress_label(c)}".strip()
+            result["job_id"] = enqueue(state, explore=(c.id, tasks), name=name)
+            batch = explore.current_batch(c)
+            if batch.status == "pending":
+                batch.status = "generating"
+        elif route in {'/api/explore/pick', '/api/explore/close-round', '/api/explore/advance'}:
+            if campaign_jobs(c.id):
+                if not data.get('force') and route != '/api/explore/advance':
+                    raise ValueError('생성이 끝나거나 중지한 뒤 진행하세요.')
+                stop_campaign_jobs(c.id)
+            if route == '/api/explore/pick':
+                explore.pick(c, state, int(data.get('generation', -1)), list(data.get('picks') or []), rng, bool(data.get('force')))
+            elif route == '/api/explore/close-round':
+                result["round"] = explore.close_round(c, state, rng, bool(data.get('force')))
+            else:
+                result["stage"] = explore.advance_stage(c, state, str(data.get('champion_id') or ''), rng, data.get('manual'),
+                                                       bool(data.get('skip_next')))
+        elif route == '/api/explore/label':
+            explore.label_trial(c, str(data.get('trial_id', '')), list(data.get('failures') or []))
+        elif route == '/api/explore/genome':
+            explore.set_genome(c, str(data.get('genome_id', '')), str(data.get('action', '')))
+        else:
+            return None
+        explore.save_campaign(c)
+    return {**result, "campaign": campaign_payload(c, state)}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -289,6 +449,20 @@ class Handler(BaseHTTPRequestHandler):
         if route == '/api/jobs':
             with JOBS_LOCK:
                 return self.send_json({"jobs": list(JOBS.values())})
+        if route == '/api/explore':
+            with EXPLORE_LOCK:
+                return self.send_json({"campaigns": explore.list_campaigns()})
+        if route.startswith('/api/explore/'):
+            with STATE_LOCK:
+                state = load_state()
+            with EXPLORE_LOCK:
+                try:
+                    c = explore.load_campaign(urllib.parse.unquote(route[len('/api/explore/'):]))
+                except FileNotFoundError as exc:
+                    return self.send_json({"error": str(exc)}, 404)
+                except ValueError as exc:
+                    return self.send_json({"error": str(exc)}, 400)
+                return self.send_json({"campaign": campaign_payload(c, state)})
         if route == '/api/quota':
             with STATE_LOCK:
                 state = load_state()
@@ -336,6 +510,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": str(exc)}, 500)
 
     def post_route(self, route, data):
+        if route.startswith('/api/explore/'):
+            try:
+                result = explore_post(route, data)
+            except FileNotFoundError as exc:
+                return self.send_json({"error": str(exc)}, 404)
+            return self.send_json(result) if result is not None else self.send_error(404)
         if route == '/api/guidance/generate':
             state = save_incoming_state(data.get('state', data))
             current, sweep = prepare_guidance(state)
@@ -392,8 +572,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_error(404)
 
 
+class EngineServer(ThreadingHTTPServer):
+    # Image grids request many files at once while a generation keeps the engine busy;
+    # the default listen backlog of 5 makes Windows refuse some of those connections.
+    request_queue_size = 128
+
+
 def serve(port=0, desktop=False):
-    server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    server = EngineServer(('127.0.0.1', port), Handler)
     print(json.dumps({"url": f"http://127.0.0.1:{server.server_port}/"}), flush=True)
     if desktop:
         # The Rust parent owns stdin. EOF (including parent crash) stops this process.

@@ -1,6 +1,6 @@
 {
   "name": "nai-aclab",
-  "version": "2.0.9",
+  "version": "2.1.0",
   "private": true,
   "description": "NAI ACLAB desktop image studio",
   "license": "MIT",
@@ -24,6 +24,7 @@
     "app.py",
     "models.py",
     "guidance.py",
+    "explore.py",
     "web_app.py",
     "launcher.py",
     "web/",

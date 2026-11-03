@@ -32,6 +32,7 @@ def default_user_dir() -> Path:
 USER_DIR = default_user_dir()
 DATA_DIR = USER_DIR / "data"
 OUTPUT_DIR = USER_DIR / "outputs"
+EXPLORE_DIR = USER_DIR / "explore"
 STATE_PATH = DATA_DIR / "app_state.json"
 TOKEN_SECRET_PATH = DATA_DIR / ("api_token.dpapi" if os.name == "nt" else "api_token.secret")
 DEFAULT_USER_AGENT = (
@@ -44,6 +45,7 @@ DEFAULT_USER_AGENT = (
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    EXPLORE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _windows_protect(data: bytes) -> bytes:
@@ -280,6 +282,15 @@ def fixed_artist_tags_for_state(state: AppState) -> list[dict]:
     return [{"category": i.get("category", "fixed"), "tag": i["tag"], "weight": float(i.get("weight", 1)),
              "prompt": weight_tag(i["tag"], float(i.get("weight", 1)))}
             for i in state.generation.fixed_artists if str(i.get("tag", "")).strip()]
+
+
+def genes_to_artists(genes) -> list[dict]:
+    """Search-campaign genes in their stored order, shaped like `fixed_artist_tags_for_state`."""
+    result = []
+    for gene in genes:
+        tag, weight = gene.tag, float(gene.weight)
+        result.append({"category": gene.group, "tag": tag, "weight": weight, "prompt": weight_tag(tag, weight)})
+    return result
 
 
 def order_artist_tags(artists: list[dict]) -> list[dict]:

@@ -20,11 +20,15 @@ test("menu and progress stay visible while every editor scrolls", async ({
       prompt: "test character",
       negative: "",
     }));
-    state.batting_scenes = Array.from({ length: 12 }, () => ({
+    // A preset can appear only once in the batting test, so use 12 presets.
+    const base = state.prompt_presets[0];
+    state.prompt_presets = Array.from({ length: 12 }, (_, i) =>
+      i ? { ...base, name: `${base.name} ${i + 1}` } : base,
+    );
+    state.batting_scenes = state.prompt_presets.map((p: any) => ({
       name: "",
-      preset: state.prompt_presets[0].name,
-      image_size: "portrait",
-      count: 1,
+      preset: p.name,
+      sizes: [{ image_size: "portrait", count: 1 }],
     }));
     Object.assign(state.api, {
       mock_mode: true,
