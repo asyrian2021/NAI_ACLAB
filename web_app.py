@@ -402,6 +402,9 @@ def explore_post(route, data):
             else:
                 result["stage"] = explore.advance_stage(c, state, str(data.get('champion_id') or ''), rng, data.get('manual'),
                                                        bool(data.get('skip_next')))
+        elif route == '/api/explore/reopen':
+            stop_campaign_jobs(c.id)
+            explore.reopen_stage(c, state, str(data.get('stage', '')), rng)
         elif route == '/api/explore/label':
             explore.label_trial(c, str(data.get('trial_id', '')), list(data.get('failures') or []))
         elif route == '/api/explore/genome':

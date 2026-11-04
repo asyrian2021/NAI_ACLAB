@@ -1,5 +1,5 @@
-import { FlaskConical, Pin, Trophy } from "lucide-react";
-import type { Artist } from "../../types";
+import { FlaskConical, Pin, RotateCcw, Trophy } from "lucide-react";
+import type { Artist, StageInfo } from "../../types";
 import type { ExploreActions } from "./ExplorePage";
 import {
   genesToArtists,
@@ -15,8 +15,11 @@ import {
 export function DoneView({
   campaign: c,
   applyFixed,
+  reopen,
 }: ExploreActions & {
   applyFixed: (artists: Artist[], toBatting: boolean) => void;
+  /** Asks to go back to an earlier stage. */
+  reopen: (stage: StageInfo) => void;
 }) {
   const final = c.genomes[c.champions.final];
   const confirm = c.champions.final
@@ -94,6 +97,16 @@ export function DoneView({
                     : "건너뜀 · 기준 세트 유지"}
                 </span>
                 {s && <span className="micro">{statsText(s)}</span>}
+                {stage.key !== "retune" && (
+                  <button
+                    className="text-button"
+                    aria-label={`${stage.name}로 돌아가기`}
+                    onClick={() => reopen(stage)}
+                  >
+                    <RotateCcw size={13} />
+                    돌아가기
+                  </button>
+                )}
               </li>
             );
           })}

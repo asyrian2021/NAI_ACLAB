@@ -137,6 +137,8 @@ class Campaign:
     updated_at: str = ""
     # Image size of the pick and retune stages; "" keeps the studio's current size (older campaigns).
     image_size: str = ""
+    # Searched group → the set it held before its stage ran ([] = none). Empty in older campaigns.
+    baselines: dict[str, list[Gene]] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------- stages
@@ -229,6 +231,7 @@ def campaign_from_dict(data: dict) -> Campaign:
         raise ValueError("이전 형식의 캠페인입니다.")
     c = _build(Campaign, data)
     c.frozen = {group: genes_from(genes) for group, genes in (c.frozen or {}).items()}
+    c.baselines = {group: genes_from(genes) for group, genes in (c.baselines or {}).items()}
     c.params = {**deepcopy(DEFAULT_PARAMS), **(c.params or {})}
     genomes = {}
     for gid, g in (c.genomes or {}).items():
@@ -816,6 +819,75 @@ def advance_stage(c: Campaign, state: AppState, champion_id: str | None, rng: ra
     return nxt
 
 
+def stage_baseline(c: Campaign, s: dict) -> list[Gene]:
+    """The set a group held before its stage ran; older campaigns read it back from the stage's first batch."""
+    group = s["group"]
+    if group in c.baselines:
+        return deepcopy(c.baselines[group])
+    if s["kind"] == "round":
+        rounds = stage_rounds(c, s["key"])
+        if rounds:
+            return group_genes(c.genomes[rounds[0].genome_ids[0]], group)
+    else:
+        gens = stage_generations(c, s["key"])
+        if gens:
+            return next((group_genes(c.genomes[gid], group) for gid, origin in zip(gens[0].genome_ids, gens[0].origins)
+                         if origin == "seed"), [])
+        # Skipped without a winner: a retune of this group started from the untouched baseline.
+        retune = stage_generations(c, "retune")
+        if retune and stage_info(c, "retune")["group"] == group:
+            return group_genes(c.genomes[retune[0].genome_ids[0]], group)
+    return deepcopy(c.frozen.get(group, []))
+
+
+def frozen_at(c: Campaign, key: str) -> dict[str, list[Gene]]:
+    """Group sets as they stood while stage `key` ran: baselines, then the winners of the stages before it."""
+    order = stages(c)
+    out = deepcopy(c.frozen)
+    for s in order:
+        if s["group"] and s["key"] != "retune":
+            base = stage_baseline(c, s)
+            if base:
+                out[s["group"]] = base
+            else:
+                out.pop(s["group"], None)
+    for s in order[:[x["key"] for x in order].index(key)]:
+        gid = c.champions.get(s["key"])
+        if s["group"] and gid in c.genomes:
+            out[s["group"]] = group_genes(c.genomes[gid], s["group"])
+    return out
+
+
+def reopen_stage(c: Campaign, state: AppState, key: str, rng: random.Random) -> None:
+    """Goes back to an earlier stage as it stood before the campaign moved past it, dropping the records
+    of the stages after it (their images stay in the studio history). A skipped stage starts fresh."""
+    order = [s["key"] for s in stages(c)]
+    if key not in order or not stage_info(c, key)["group"]:
+        raise ValueError("돌아갈 수 없는 단계입니다.")
+    if order.index(key) >= order.index(c.stage):
+        raise ValueError("지나온 단계로만 돌아갈 수 있습니다.")
+    previous = deepcopy(c)
+    try:
+        frozen = frozen_at(c, key)
+        if not c.baselines:  # Keep the read-back sets: the batches they came from may be dropped below.
+            c.baselines = {s["group"]: stage_baseline(c, s) for s in stages(c) if s["group"] and s["key"] != "retune"}
+        later = set(order[order.index(key) + 1:])
+        c.generations = [g for g in c.generations if g.stage not in later]
+        c.rounds = [r for r in c.rounds if r.stage not in later]
+        c.trials = [t for t in c.trials if t.stage not in later]
+        c.champions = {k: v for k, v in c.champions.items() if k not in later and k not in (key, "final")}
+        c.frozen, c.stage = frozen, key
+        batch = current_batch(c)
+        if batch is None:
+            enter_stage(c, state, rng)
+        elif batch.status == "done" and not (batch.picks if isinstance(batch, Generation) else batch.result):
+            batch.status = "pending"  # Left unfinished by a skip: open it again.
+            refresh_status(c)
+    except Exception:
+        c.__dict__.update(previous.__dict__)
+        raise
+
+
 def clean_params(params: dict | None) -> dict:
     merged = deepcopy(DEFAULT_PARAMS)
     for key, value in (params or {}).items():
@@ -880,6 +952,7 @@ def create_campaign(state: AppState, name: str, plan: list, preset: str, frozen:
     c.frozen = {group: genes_from(genes) for group, genes in sets.items()}
     if not c.frozen.get(first) and stage_info(c)["kind"] == "round":
         c.frozen[first] = random_genome(state, first, rng, centered=True)
+    c.baselines = {p["group"]: deepcopy(c.frozen.get(p["group"], [])) for p in plan if p["mode"] != "fixed"}
     enter_stage(c, state, rng, start=start)
     return c
 
@@ -933,7 +1006,12 @@ def refresh_status(c: Campaign) -> None:
     batch.status = waiting if not pending_tasks(c) else "generating" if started else batch.status
 
 
-def record_trial(c: Campaign, task: dict, image_path: str, job_id: str, error: str = "", trial_id: str = "") -> Trial:
+def record_trial(c: Campaign, task: dict, image_path: str, job_id: str, error: str = "",
+                 trial_id: str = "") -> Trial | None:
+    """Ignores an image whose batch is gone (the campaign went back past it while it was generating)."""
+    stage, index, seed = task.get("stage", c.stage), int(task.get("batch", 0)), int(task["seed"])
+    if not any(b.stage == stage and b.index == index and seed in b.seeds for b in [*c.generations, *c.rounds]):
+        return None
     trial = Trial(id=trial_id or uuid.uuid4().hex[:12], genome_id=task["genome_id"], seed=int(task["seed"]),
                   scene=task["scene"], image_path=image_path, job_id=job_id, error=error,
                   stage=task.get("stage", c.stage), batch=int(task.get("batch", 0)), created_at=now())

@@ -1,4 +1,5 @@
-import { Plus, Trash2 } from "lucide-react";
+import { useRef } from "react";
+import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { NumericInput } from "../components/NumericInput";
 import type { ShowToast } from "../hooks/useNotices";
 import type { Edit } from "../lib/actions";
@@ -15,19 +16,48 @@ export function ArtistsPage({
   edit: Edit;
   notify: ShowToast;
 }) {
+  // Stable React keys per group, so a moved group keeps its editor's draft text.
+  const keys = useRef<number[]>([]);
+  const nextKey = useRef(0);
+  while (keys.current.length < state.categories.length)
+    keys.current.push(nextKey.current++);
+  keys.current.length = state.categories.length;
+  const page = useRef<HTMLDivElement>(null);
+
   function deleteGroup(i: number) {
     const removed = state.categories[i];
+    keys.current.splice(i, 1);
     edit((s) => s.categories.splice(i, 1));
     notify(`“${removed.name}” 그룹을 삭제했습니다.`, {
       label: "실행 취소",
-      run: () =>
+      run: () => {
+        keys.current.splice(i, 0, nextKey.current++);
         edit((s) =>
           s.categories.splice(
             Math.min(i, s.categories.length),
             0,
             structuredClone(removed),
           ),
-        ),
+        );
+      },
+    });
+  }
+  function moveGroup(i: number, step: -1 | 1) {
+    const j = i + step;
+    if (j < 0 || j >= state.categories.length) return;
+    const k = keys.current;
+    [k[i], k[j]] = [k[j], k[i]];
+    edit((s) => {
+      [s.categories[i], s.categories[j]] = [s.categories[j], s.categories[i]];
+    });
+    // Keep the focus on the same button of the moved group (or the other one at an edge).
+    requestAnimationFrame(() => {
+      const editors = page.current?.querySelectorAll(".artist-editor");
+      const buttons = editors?.[j]?.querySelectorAll<HTMLButtonElement>(
+        ".artist-order button",
+      );
+      const same = buttons?.[step < 0 ? 0 : 1];
+      (same && !same.disabled ? same : buttons?.[step < 0 ? 1 : 0])?.focus();
     });
   }
   return (
@@ -38,6 +68,8 @@ export function ArtistsPage({
           <h1>작가와 랜덤 조합</h1>
           <p>
             작가는 균등하게 추첨하고, 가중치와 태그 순서도 매번 새로 정합니다.
+            그룹 순서는 화살표로 바꿀 수 있고, 탐색 메뉴의 작가 순서가 이 순서를
+            따릅니다.
           </p>
         </div>
         <button
@@ -62,10 +94,13 @@ export function ArtistsPage({
           그룹 추가
         </button>
       </div>
-      <div className="artist-editors">
+      <div className="artist-editors" ref={page}>
         {state.categories.map((c, i) => (
-          <section className="artist-editor" key={i}>
+          <section className="artist-editor" key={keys.current[i]}>
             <div className="row spread">
+              <span className="artist-order-number" aria-hidden="true">
+                {i + 1}
+              </span>
               <NumericInput
                 aria-label="작가 그룹 이름"
                 value={c.name}
@@ -73,6 +108,24 @@ export function ArtistsPage({
                   edit((s) => (s.categories[i].name = e.target.value))
                 }
               />
+              <div className="artist-order">
+                <button
+                  aria-label={`${c.name} 그룹 앞으로`}
+                  title="앞으로"
+                  disabled={i === 0}
+                  onClick={() => moveGroup(i, -1)}
+                >
+                  <ArrowUp size={15} />
+                </button>
+                <button
+                  aria-label={`${c.name} 그룹 뒤로`}
+                  title="뒤로"
+                  disabled={i === state.categories.length - 1}
+                  onClick={() => moveGroup(i, 1)}
+                >
+                  <ArrowDown size={15} />
+                </button>
+              </div>
               <button
                 aria-label="작가 그룹 삭제"
                 onClick={() => deleteGroup(i)}

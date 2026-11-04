@@ -218,7 +218,7 @@ class RoundTests(unittest.TestCase):
         good = set(r1.genome_ids[4:])
         fill_trials(self.c, lambda t: [] if t["genome_id"] in good else ["anatomy"])
         # A void attempt on a good candidate neither counts as failure nor as success.
-        ex.record_trial(self.c, {"genome_id": r1.genome_ids[4], "seed": 1, "scene": "기본", "stage": "s1", "batch": 0},
+        ex.record_trial(self.c, {"genome_id": r1.genome_ids[4], "seed": r1.seeds[0], "scene": "기본", "stage": "s1", "batch": 0},
                         "", "job", error="timeout")
         self.assertEqual(r1.status, "awaiting_labels")
         result = ex.close_round(self.c, self.state, self.rng)
@@ -305,6 +305,129 @@ class RoundTests(unittest.TestCase):
             ex.label_trial(self.c, trial.id, ["unknown"])
         with self.assertRaises(ValueError):
             ex.label_trial(self.c, trial.id, ["feet"])  # Feet is only judged in the feet stage.
+
+
+class ReopenTests(unittest.TestCase):
+    """Going back to an earlier stage of a finished campaign."""
+
+    def setUp(self):
+        self.state = make_state()
+        self.rng = random.Random(13)
+        self.c = ex.create_campaign(self.state, "t", PLAN, "기본", rng=self.rng)
+        self.feet_base = [(g.tag, g.weight) for g in self.c.frozen["발"]]
+
+    def finish(self, skip_feet_unseen=False):
+        """s0 pick → s1 rounds → s2 skipped → retune with a new winner → confirm → done."""
+        c = self.c
+        fill_trials(c)
+        self.main = c.generations[0].genome_ids[1]
+        ex.pick(c, self.state, 0, [self.main], self.rng)
+        ex.advance_stage(c, self.state, self.main, self.rng)
+        while not ex.current_batch(c).result:
+            fill_trials(c)
+            ex.close_round(c, self.state, self.rng)
+        self.body = ex.current_batch(c).result["finalists"][0]
+        ex.advance_stage(c, self.state, self.body, self.rng, skip_next=skip_feet_unseen)
+        if not skip_feet_unseen:
+            fill_trials(c)  # Some feet images exist, then the stage is skipped.
+            ex.advance_stage(c, self.state, "", self.rng)
+        gen = ex.current_batch(c)
+        fill_trials(c)
+        ex.pick(c, self.state, gen.index, [gen.genome_ids[2]], self.rng)
+        self.retuned = gen.genome_ids[2]
+        self.stale = ex.pending_tasks(c)[0]  # A retune image still generating when the user goes back.
+        ex.advance_stage(c, self.state, self.retuned, self.rng)
+        fill_trials(c)
+        ex.close_round(c, self.state, self.rng)
+        self.assertEqual(c.stage, "done")
+
+    def pairs(self, genes):
+        return [(g.tag, g.weight) for g in genes]
+
+    def assert_back_at_feet(self):
+        c = self.c
+        self.assertEqual(c.stage, "s2")
+        self.assertEqual(set(c.champions), {"s0", "s1"})
+        self.assertFalse([b for b in [*c.generations, *c.rounds, *c.trials] if b.stage in ("retune", "confirm")])
+        # The main group holds its stage 1 winner again, not the retune result.
+        self.assertEqual(c.frozen["메인"], ex.group_genes(c.genomes[self.main], "메인"))
+        self.assertEqual(c.frozen["신체"], ex.group_genes(c.genomes[self.body], "신체"))
+        self.assertEqual(self.pairs(c.frozen["발"]), self.feet_base)
+        r = ex.current_batch(c)
+        self.assertEqual(self.pairs(ex.group_genes(c.genomes[r.genome_ids[0]], "발")), self.feet_base)
+        self.assertEqual(ex.group_genes(c.genomes[r.genome_ids[0]], "메인"), c.frozen["메인"])
+        return r
+
+    def test_skipped_stage_resumes_where_it_was_left(self):
+        self.finish()
+        made = len([t for t in self.c.trials if t.stage == "s2"])
+        ex.reopen_stage(self.c, self.state, "s2", self.rng)
+        r = self.assert_back_at_feet()
+        self.assertEqual(r.status, "awaiting_labels")
+        self.assertEqual(len([t for t in self.c.trials if t.stage == "s2"]), made)
+        # Finishing it again runs the later stages anew.
+        while not ex.current_batch(self.c).result:
+            fill_trials(self.c)
+            ex.close_round(self.c, self.state, self.rng)
+        feet = ex.current_batch(self.c).result["finalists"][0]
+        self.assertEqual(ex.advance_stage(self.c, self.state, feet, self.rng), "retune")
+        self.assertEqual(ex.current_batch(self.c).genome_ids[0], ex.genome_id(ex.full_genes(self.c, "메인", self.c.frozen["메인"])))
+
+    def test_candidate_confirmed_mid_round_resumes_that_round(self):
+        c = self.c
+        fill_trials(c)
+        main = c.generations[0].genome_ids[1]
+        ex.pick(c, self.state, 0, [main], self.rng)
+        ex.advance_stage(c, self.state, main, self.rng)
+        r1 = ex.current_batch(c)
+        fill_trials(c)
+        early = r1.genome_ids[3]
+        # Chosen straight from the first round, before it is closed.
+        self.assertEqual(ex.advance_stage(c, self.state, early, self.rng), "s2")
+        self.assertEqual(c.champions["s1"], early)
+        self.assertEqual(c.frozen["신체"], ex.group_genes(c.genomes[early], "신체"))
+        self.assertEqual(len(ex.stage_rounds(c, "s1")), 1)
+        ex.reopen_stage(c, self.state, "s1", self.rng)
+        self.assertEqual(c.stage, "s1")
+        self.assertNotIn("s1", c.champions)
+        r = ex.current_batch(c)
+        self.assertEqual((r.index, r.status), (0, "awaiting_labels"))
+        ex.close_round(c, self.state, self.rng)
+        self.assertEqual(ex.current_batch(c).index, 1)
+
+    def test_stage_skipped_unseen_starts_fresh(self):
+        self.finish(skip_feet_unseen=True)
+        self.assertFalse(ex.stage_rounds(self.c, "s2"))
+        ex.reopen_stage(self.c, self.state, "s2", self.rng)
+        r = self.assert_back_at_feet()
+        self.assertEqual((r.index, r.status, len(r.genome_ids)), (0, "pending", 8))
+
+    def test_older_campaign_without_stored_baselines(self):
+        self.finish()
+        self.c.baselines = {}
+        ex.reopen_stage(self.c, self.state, "s2", self.rng)
+        self.assert_back_at_feet()
+        self.assertEqual(self.pairs(self.c.baselines["발"]), self.feet_base)
+
+    def test_late_image_of_a_dropped_stage_is_ignored(self):
+        self.finish()
+        ex.reopen_stage(self.c, self.state, "s1", self.rng)
+        self.assertEqual(self.c.stage, "s1")
+        self.assertEqual(ex.current_batch(self.c).status, "done")  # The final round waits for a winner again.
+        self.assertNotIn("s1", self.c.champions)
+        self.assertIsNone(ex.record_trial(self.c, self.stale, "late.png", "job"))
+        self.assertFalse([t for t in self.c.trials if t.stage == "retune"])
+
+    def test_only_earlier_searched_stages(self):
+        for key in ("s0", "retune", "confirm", "done", "nope"):
+            with self.assertRaises(ValueError):
+                ex.reopen_stage(self.c, self.state, key, self.rng)
+        self.finish(skip_feet_unseen=True)
+        before = ex.campaign_to_dict(self.c)
+        self.state.batting_scenes[2].tags = []  # No scene for the feet stage: the campaign stays as it was.
+        with self.assertRaises(ValueError):
+            ex.reopen_stage(self.c, self.state, "s2", self.rng)
+        self.assertEqual(ex.campaign_to_dict(self.c), before)
 
 
 class PlanTests(unittest.TestCase):

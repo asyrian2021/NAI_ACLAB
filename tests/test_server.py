@@ -300,6 +300,25 @@ class ServerTests(unittest.TestCase):
         self.assertNotIn(trial['genome_id'],result['campaign']['rounds'][0]['survivors'])
         self.assertEqual(len(result['campaign']['rounds'][1]['seeds']),4)
 
+    def test_explore_reopen_skipped_stage(self):
+        state=self.explore_state()
+        c=self.request('/api/explore/create',{'plan':[{'group':'메인','mode':'pick'},{'group':'신체','mode':'rate'}],'preset':state['generation']['preset'],'image_size':'square'})['campaign']
+        winner=c['generations'][0]['genome_ids'][0]
+        c=self.request('/api/explore/advance',{'id':c['id'],'champion_id':winner})['campaign']
+        body=c['frozen']['신체']
+        for _ in range(2):c=self.request('/api/explore/advance',{'id':c['id'],'champion_id':''})['campaign']
+        self.assertEqual(c['stage'],'confirm')
+        with self.assertRaises(urllib.error.HTTPError) as e:self.request('/api/explore/reopen',{'id':c['id'],'stage':'confirm'})
+        self.assertEqual(e.exception.code,400)
+        job='explore-reopen-test'
+        web.JOBS[job]={'id':job,'status':'running','progress':0,'total':4,'campaign_id':c['id']}
+        c=self.request('/api/explore/reopen',{'id':c['id'],'stage':'s1'})['campaign']
+        self.assertEqual(web.JOBS[job]['status'],'cancelling')  # Images of the dropped stages stop.
+        self.assertEqual((c['stage'],c['info']['pending'],c['frozen']['신체']),('s1',16,body))
+        self.assertEqual(c['champions'],{'s0':winner})
+        self.assertFalse([r for r in c['rounds'] if r['stage']=='confirm'])
+        self.assertEqual(self.request('/api/explore/'+c['id'])['campaign']['stage'],'s1')
+
     def test_media_traversal_is_rejected(self):
         self.assertIsNone(web.safe_child_path(web.OUTPUT_DIR,'../secret'))
         self.assertIsNone(web.safe_child_path(web.OUTPUT_DIR,'%2e%2e/secret'))

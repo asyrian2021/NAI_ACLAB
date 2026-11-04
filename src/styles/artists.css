@@ -20,6 +20,23 @@
   border-color: transparent;
   padding-left: 0;
 }
+.artist-order-number {
+  flex: none;
+  min-width: 26px;
+  height: 26px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--color-accent-surface);
+  color: var(--color-accent-text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.artist-order {
+  flex: none;
+  display: inline-flex;
+  gap: 4px;
+}
 .artist-editor p {
   margin: var(--space-3) 0;
 }

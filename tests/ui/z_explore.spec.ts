@@ -81,7 +81,12 @@ test("combination search runs from evolution through a round to a fixed combinat
   await nav.getByRole("button", { name: "탐색", exact: true }).click();
   await page.getByRole("button", { name: "새 캠페인", exact: true }).click();
   await page.getByPlaceholder("예: 수채화 톤 찾기").fill("e2e 탐색");
-  // Modes are guessed from the group names and can be changed per group.
+  // Groups start in the artist menu's order; modes are guessed from the names.
+  await expect(page.locator(".plan-group strong")).toHaveText([
+    "탐색 메인",
+    "색감",
+    "탐색 신체",
+  ]);
   await expect(page.getByLabel("탐색 메인 탐색 방식")).toHaveValue("pick");
   await expect(page.getByLabel("탐색 신체 탐색 방식")).toHaveValue("rate");
   await expect(page.getByLabel("색감 탐색 방식")).toHaveValue("fixed");
@@ -185,11 +190,12 @@ test("combination search runs from evolution through a round to a fixed combinat
   await expect(page.locator(".round-cell:focus")).toHaveCount(1);
   await page.getByRole("button", { name: "라운드 마감" }).click();
   await expect(page.locator(".evolve-status strong")).toHaveText("R2 / 3");
-  await page.getByRole("button", { name: "건너뛰기" }).click();
-  await page
-    .getByRole("button", { name: "건너뛰기", exact: true })
-    .last()
-    .click();
+  // A candidate can be confirmed mid-way, without running the remaining rounds.
+  await expect(page.locator(".candidate-confirm")).toHaveCount(4);
+  await page.locator(".candidate-confirm").first().click();
+  const early = page.getByRole("alertdialog", { name: /로 확정할까요\?$/ });
+  await expect(early).toContainText("남은 라운드를 건너뛰고");
+  await early.getByRole("button", { name: "이 후보로 확정" }).click();
 
   // Stage 4 retune starts in convergence mode; keep the main group as it is.
   await expect(page.locator(".evolve-status")).toContainText("수렴 모드");
@@ -217,6 +223,25 @@ test("combination search runs from evolution through a round to a fixed combinat
       }),
     )
     .toEqual(expect.arrayContaining(["탐색 메인", "색감", "탐색 신체"]));
+
+  // The rate stage opens again where it was left (R2), dropping the later stages.
+  await page
+    .getByRole("region", { name: "단계별 우승" })
+    .getByRole("button", { name: "2단계 · 탐색 신체 타율로 돌아가기" })
+    .click();
+  const reopen = page.getByRole("alertdialog", {
+    name: "2단계 · 탐색 신체 타율로 돌아갈까요?",
+  });
+  await expect(reopen).toContainText("재조정 · 탐색 메인, 최종 확인");
+  await reopen.getByRole("button", { name: "이 단계로 돌아가기" }).click();
+  await expect(page.locator(".evolve-status strong")).toHaveText("R2 / 3");
+  await expect(page.locator(".explore-steps li.current")).toHaveText(
+    "2단계 탐색 신체",
+  );
+  await expect(
+    page.getByRole("button", { name: "1단계 · 탐색 메인 고르기로 돌아가기" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "16장 생성" })).toBeVisible();
   expect(errors).toEqual([]);
 
   // Later specs count studio thumbnails (capped at 60), so remove this run's images and campaign.

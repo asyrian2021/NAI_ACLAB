@@ -65,7 +65,9 @@ export function RoundView({
   );
   const rows = r.genome_ids;
   const [focus, setFocus] = useState({ row: 0, col: 0 });
-  const [ask, setAsk] = useState<"" | "force" | "skip" | "scenes">("");
+  const [ask, setAsk] = useState<"" | "force" | "skip" | "scenes" | "early">(
+    "",
+  );
   const [chosen, setChosen] = useState("");
   const saving = useRef<Promise<unknown>>(Promise.resolve());
   const latestLabel = useRef(0);
@@ -438,6 +440,20 @@ export function RoundView({
                   {reasonsText(s) && (
                     <span className="micro">{reasonsText(s)}</span>
                   )}
+                  {!confirmStage && !done && !out && (
+                    <button
+                      className="text-button candidate-confirm"
+                      aria-label={`${name(gid)}로 바로 확정`}
+                      disabled={busy}
+                      onClick={() => {
+                        setChosen(gid);
+                        setAsk("early");
+                      }}
+                    >
+                      <Trophy size={13} />
+                      바로 확정
+                    </button>
+                  )}
                   {!out && (
                     <details>
                       <summary>작가 · 장면별</summary>
@@ -546,6 +562,25 @@ export function RoundView({
           {confirmStage
             ? "확인 없이 최종 조합으로 마칩니다."
             : "이 그룹은 기준 세트를 그대로 유지하고 다음 단계로 넘어갑니다."}
+        </ConfirmDialog>
+      )}
+      {ask === "early" && (
+        <ConfirmDialog
+          title={`${name(chosen)}로 확정할까요?`}
+          confirmLabel="이 후보로 확정"
+          cancel={() => setAsk("")}
+          confirm={() => {
+            setAsk("");
+            advance(chosen);
+          }}
+        >
+          지금까지 결과: {statsText(stats[chosen])}.{" "}
+          {r.index + 1 < c.info.round_count
+            ? "남은 라운드를 건너뛰고 "
+            : "라운드를 마감하지 않고 "}
+          이 후보를 우승 조합으로 정한 뒤 다음 단계로 넘어갑니다.
+          {running && " 진행 중인 생성은 중지됩니다."} 나중에 이 단계로 돌아오면
+          지금 라운드부터 이어서 할 수 있습니다.
         </ConfirmDialog>
       )}
       {ask === "scenes" && (

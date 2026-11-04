@@ -167,13 +167,14 @@ export function weightGrid(category: Category | undefined) {
 
 /**
  * A first guess at each group's mode from its name; the user changes it in the
- * form. Rate groups start on all scenes: scene tags are the user's own.
+ * form. Groups keep the artist menu's order as the starting search order.
+ * Rate groups start on all scenes: scene tags are the user's own.
  */
 export function guessPlan(categories: Category[]): PlanEntry[] {
   const stabilizer = /신체|안정|손|발|해부|body|anatomy|hand|feet|foot/i;
   const feet = /발|feet|foot/i;
   let picked = false;
-  const plan = categories.map((c): PlanEntry => {
+  return categories.map((c): PlanEntry => {
     if (stabilizer.test(c.name))
       return feet.test(c.name)
         ? {
@@ -194,19 +195,6 @@ export function guessPlan(categories: Category[]): PlanEntry[] {
     }
     return { group: c.name, mode: "fixed" };
   });
-  // Search order: pick groups first, then rate groups (feet last), then the rest.
-  const rank = (p: PlanEntry) =>
-    p.mode === "pick"
-      ? 0
-      : p.mode === "rate"
-        ? p.labels?.includes("feet")
-          ? 2
-          : 1
-        : 3;
-  return plan
-    .map((p, i) => ({ p, i }))
-    .sort((a, b) => rank(a.p) - rank(b.p) || a.i - b.i)
-    .map(({ p }) => p);
 }
 
 /** Candidate letters follow the R1 order so a combination keeps its name across rounds. */

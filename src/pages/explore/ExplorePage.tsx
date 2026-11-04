@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, Check, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, RotateCcw, Trash2 } from "lucide-react";
 import { exploreApi } from "../../api";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { Edit, Tab, Task } from "../../lib/actions";
@@ -9,6 +9,7 @@ import type {
   CampaignSummary,
   ExploreEntry,
   Job,
+  StageInfo,
 } from "../../types";
 import { DoneView } from "./DoneView";
 import { EvolveView } from "./EvolveView";
@@ -65,6 +66,7 @@ export function ExplorePage({
   const [campaigns, setCampaigns] = useState<CampaignSummary[] | null>(null);
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [reopen, setReopen] = useState<StageInfo | null>(null);
 
   const campaignJobs = jobs.filter(
     (j) => j.campaign_id && j.campaign_id === openId,
@@ -137,6 +139,16 @@ export function ExplorePage({
   };
   const steps = campaign.info.stages;
   const stepIndex = steps.findIndex((s) => s.key === campaign.stage);
+  // Earlier searched stages can be opened again (the final check is redone from the stages).
+  const canReopen = (step: StageInfo) =>
+    !!step.group &&
+    step.key !== "retune" &&
+    steps.findIndex((s) => s.key === step.key) < stepIndex;
+  const dropped = reopen
+    ? steps
+        .slice(steps.findIndex((s) => s.key === reopen.key) + 1, stepIndex + 1)
+        .filter((s) => s.kind !== "done")
+    : [];
 
   return (
     <div className="explore">
@@ -159,20 +171,35 @@ export function ExplorePage({
               key={step.key}
               title={step.name}
               className={
-                index < stepIndex
+                (canReopen(step) ? "reopenable " : "") +
+                (index < stepIndex
                   ? "done"
                   : index === stepIndex
                     ? "current"
-                    : ""
+                    : "")
               }
               aria-current={index === stepIndex ? "step" : undefined}
             >
-              {index < stepIndex && <Check size={12} />}
-              {step.kind === "done"
-                ? step.name
-                : step.group
-                  ? `${stagePrefix(step)} ${step.group}`
-                  : step.name}
+              {canReopen(step) ? (
+                <button
+                  className="step-reopen"
+                  aria-label={`${step.name}로 돌아가기`}
+                  onClick={() => setReopen(step)}
+                >
+                  <Check size={12} />
+                  {`${stagePrefix(step)} ${step.group}`}
+                  <RotateCcw size={11} className="step-reopen-icon" />
+                </button>
+              ) : (
+                <>
+                  {index < stepIndex && <Check size={12} />}
+                  {step.kind === "done"
+                    ? step.name
+                    : step.group
+                      ? `${stagePrefix(step)} ${step.group}`
+                      : step.name}
+                </>
+              )}
             </li>
           ))}
         </ol>
@@ -193,6 +220,7 @@ export function ExplorePage({
       ) : campaign.info.stage.kind === "done" ? (
         <DoneView
           {...actions}
+          reopen={(step) => setReopen(step)}
           applyFixed={(artists, toBatting) => {
             edit((s) => {
               s.generation.fixed_artists = artists;
@@ -213,6 +241,33 @@ export function ExplorePage({
           {...actions}
           state={state}
         />
+      )}
+      {reopen && (
+        <ConfirmDialog
+          title={`${reopen.name}로 돌아갈까요?`}
+          confirmLabel="이 단계로 돌아가기"
+          cancel={() => setReopen(null)}
+          confirm={() => {
+            const step = reopen;
+            setReopen(null);
+            void task(async () => {
+              const r = await exploreApi.reopen(campaign.id, step.key);
+              setCampaign(r.campaign);
+              setMessage(`${step.name}로 돌아왔습니다.`);
+            });
+          }}
+        >
+          {campaign.champions[reopen.key]
+            ? "우승 조합을 확정하기 직전 상태로 돌아갑니다."
+            : [...campaign.rounds, ...campaign.generations].some(
+                  (b) => b.stage === reopen.key,
+                )
+              ? "건너뛰기 직전 상태로 돌아가 이어서 진행합니다."
+              : "이 단계를 처음부터 시작합니다."}{" "}
+          {dropped.length > 0 &&
+            `그 뒤 단계(${dropped.map((s) => s.name).join(", ")})의 선택과 라벨 기록은 지워지고, 이 단계를 마치면 다시 진행합니다. `}
+          생성한 이미지는 작업실 기록에 남습니다.
+        </ConfirmDialog>
       )}
       {confirmDelete && (
         <ConfirmDialog

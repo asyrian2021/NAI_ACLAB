@@ -64,6 +64,8 @@ export const exploreApi = {
       champion_id,
       skip_next,
     }),
+  reopen: (id: string, stage: string) =>
+    api<CampaignReply>("explore/reopen", { id, stage }),
   genome: (id: string, genome_id: string, action: "eliminate" | "revive") =>
     api<CampaignReply>("explore/genome", { id, genome_id, action }),
   remove: (id: string) => api<{ ok: boolean }>("explore/delete", { id }),

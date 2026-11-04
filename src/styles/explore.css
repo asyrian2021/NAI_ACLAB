@@ -50,6 +50,27 @@
   color: var(--color-accent-text);
   border-color: var(--color-accent-border-subtle);
 }
+.explore-steps li.reopenable {
+  padding: 0;
+}
+.step-reopen {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.step-reopen-icon {
+  opacity: 0.55;
+}
+.step-reopen:hover .step-reopen-icon,
+.step-reopen:focus-visible .step-reopen-icon {
+  opacity: 1;
+}
 .explore-steps li.current {
   color: var(--color-on-accent);
   background: var(--color-accent);
@@ -605,6 +626,12 @@ button.finish-suggested {
   align-items: center;
   gap: 3px;
 }
+.candidate-confirm {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
 .candidate-rate {
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
@@ -723,6 +750,9 @@ button.finish-suggested {
   display: grid;
   gap: 2px;
   font-size: var(--fs-sm);
+}
+.done-stages li .text-button {
+  justify-self: start;
 }
 
 /* Batting page additions: scene tags and the search entry button */
