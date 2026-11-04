@@ -139,17 +139,18 @@ function initialPlan(state: AppState, entry: ExploreEntry | null) {
 
 /** Engine defaults that the form does not expose (see DEFAULT_PARAMS in explore.py). */
 const ROUND_SEEDS = [2, 4, 8];
-const RETUNE_GENERATIONS = 4;
+const RETUNE_GENERATIONS = 2;
 
-/** Images a rate stage generates: each round keeps half the candidates and doubles the seeds per scene. */
+/**
+ * Most images a rate stage generates without a retry: each round keeps at most
+ * half the candidates (those past the pass rate) and doubles the seeds per scene.
+ */
 function rateImages(candidates: number, scenes: number) {
   let total = 0,
     alive = candidates;
   for (const seeds of ROUND_SEEDS) {
     total += alive * scenes * seeds;
-    const keep = Math.max(1, Math.floor(alive / 2));
-    if (keep <= 1) break;
-    alive = keep;
+    alive = Math.max(1, Math.floor(alive / 2));
   }
   return total;
 }
@@ -194,11 +195,12 @@ function CreateForm({
   const [frozen, setFrozen] = useState<Record<string, Gene[]>>({});
   const [params, setParams] = useState({
     pop_size: 6,
-    seeds_per_gen: 2,
-    max_generations: 12,
+    seeds_per_gen: 1,
+    max_generations: 3,
     round_candidates: 8,
     confirm_seeds: 4,
   });
+  const [passPercent, setPassPercent] = useState(70);
   const [drawn, setDrawn] = useState(0);
   const used = plan.filter((p) => p.mode !== "off");
   const searched = used.filter((p) => p.mode !== "fixed");
@@ -260,22 +262,22 @@ function CreateForm({
   // Image counts the current settings lead to, so the cost is visible before starting.
   const num = (v: number, fallback: number) =>
     Number.isFinite(v) && v > 0 ? Math.round(v) : fallback;
-  const perGen = num(params.pop_size, 6) * num(params.seeds_per_gen, 2);
+  const perGen = num(params.pop_size, 6) * num(params.seeds_per_gen, 1);
   const pickIndex = searched.findIndex((p) => p.mode === "pick");
   const estimates = [
     ...(pickIndex >= 0
       ? [
-          `고르기: 한 세대 ${perGen}장 (조합 ${num(params.pop_size, 6)}개 × 시드 ${num(params.seeds_per_gen, 2)}개), 단계마다 최대 ${num(params.max_generations, 12)}세대`,
+          `고르기: 한 라운드 ${perGen}장 (조합 ${num(params.pop_size, 6)}개 × 시드 ${num(params.seeds_per_gen, 1)}개, 2~3장씩 비교), 단계마다 ${num(params.max_generations, 3)}라운드`,
         ]
       : []),
     ...searched
       .filter((p) => p.mode === "rate")
       .map((p) => {
         const scenes = scenesFor(p.scene_tag);
-        return `${p.group} 타율: 약 ${rateImages(num(params.round_candidates, 8), scenes)}장 (장면 ${scenes}개, 라운드 최대 3번)`;
+        return `${p.group} 타율: 최대 ${rateImages(num(params.round_candidates, 8), scenes)}장 (장면 ${scenes}개, 라운드 3번, 모두 ${num(passPercent, 70)}% 미만이면 R1 재도전)`;
       }),
     ...(pickIndex >= 0 && pickIndex < searched.length - 1
-      ? [`재조정: 한 세대 ${perGen}장, 최대 ${RETUNE_GENERATIONS}세대`]
+      ? [`재조정: 한 라운드 ${perGen}장, ${RETUNE_GENERATIONS}라운드`]
       : []),
     `최종 확인: ${Math.max(1, scenesFor()) * num(params.confirm_seeds, 4)}장 (장면 ${Math.max(1, scenesFor())}개 × 시드 ${num(params.confirm_seeds, 4)}개)`,
   ];
@@ -498,31 +500,31 @@ function CreateForm({
             [
               [
                 "pop_size",
-                "세대당 조합 수",
+                "라운드당 조합 수",
                 2,
                 8,
-                "한 번에 나란히 비교할 조합 수입니다. 많을수록 다양하지만 고르기 어렵습니다.",
+                "한 라운드에 시도할 조합 수입니다. 2~3개씩 나눠 비교한 뒤 조별 승자끼리 결승을 합니다.",
               ],
               [
                 "seeds_per_gen",
-                "세대당 공통 시드",
+                "라운드당 공통 시드",
                 1,
                 4,
-                "조합마다 같은 시드로 몇 장씩 만들지 정합니다. 많을수록 운의 영향이 줄어듭니다.",
+                "조합마다 같은 시드로 몇 장씩 만들지 정합니다. 2 이상이면 비교 화면에서 ↑ ↓로 시드를 바꿔 봅니다.",
               ],
               [
                 "max_generations",
-                "고르기 최대 세대",
-                2,
+                "고르기 라운드 수",
+                1,
                 30,
-                "고르기 단계마다 만들 수 있는 세대 수의 상한입니다. 보통 그 전에 수렴합니다.",
+                "고르기 단계마다 진행할 라운드 수입니다. 마지막 라운드는 미세 조정이고, 끝난 뒤 한 라운드씩 더할 수 있습니다.",
               ],
               [
                 "round_candidates",
                 "타율 후보 수",
                 2,
                 12,
-                "타율 단계 첫 라운드의 후보 수입니다. 라운드마다 절반만 남습니다.",
+                "타율 단계 첫 라운드의 후보 수입니다. 라운드마다 통과 기준을 넘은 후보 중 절반까지만 남습니다.",
               ],
               [
                 "confirm_seeds",
@@ -549,6 +551,20 @@ function CreateForm({
               </span>
             </label>
           ))}
+          <label className="param-field">
+            타율 통과 기준(%)
+            <NumericInput
+              type="number"
+              min={10}
+              max={100}
+              value={passPercent}
+              onChange={(e) => setPassPercent(e.target.valueAsNumber)}
+            />
+            <span className="micro">
+              타율 라운드마다 이 성공률 이상인 후보만 다음 라운드로 갑니다.
+              아무도 넘지 못하면 새 후보로 R1을 다시 합니다. (10~100)
+            </span>
+          </label>
         </div>
         <ul className="param-estimate micro" aria-label="예상 생성 장수">
           {estimates.map((line) => (
@@ -575,7 +591,12 @@ function CreateForm({
                 image_size: hasPick ? imageSize : "",
                 frozen,
                 start_genes: entry?.artists,
-                params: clean,
+                params: {
+                  ...clean,
+                  pass_rate: Number.isFinite(passPercent)
+                    ? Math.min(100, Math.max(10, passPercent)) / 100
+                    : undefined,
+                },
               });
               await created(r.campaign);
             })

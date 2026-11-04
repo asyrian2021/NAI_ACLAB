@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import {
   Archive,
   Flag,
@@ -6,6 +6,7 @@ import {
   Play,
   Sparkles,
   ThumbsDown,
+  Undo2,
 } from "lucide-react";
 import { exploreApi } from "../../api";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
@@ -14,6 +15,7 @@ import type { ExploreActions } from "./ExplorePage";
 import { ExploreViewer } from "./ExploreViewer";
 import { needsSceneWarning, SceneWarningDialog } from "./SceneWarning";
 import {
+  bracket,
   cellKey,
   currentGeneration,
   diffGenes,
@@ -92,57 +94,66 @@ export function EvolveView({
   const gen = currentGeneration(c)!;
   const group = c.info.stage.group!;
   const trials = trialMap(c, c.stage, gen.index);
-  const [picks, setPicks] = useState<string[]>(gen.picks);
-  const [noneChosen, setNoneChosen] = useState(false);
+  // Outcome of each bracket match (undefined = still open, null = all bad).
+  const [winners, setWinners] = useState<(string | null | undefined)[]>([]);
+  const [seedRow, setSeedRow] = useState(0);
   const [viewer, setViewer] = useState<{ row: number; col: number } | null>(
     null,
   );
-  const [askForce, setAskForce] = useState(false);
+  const [askForce, setAskForce] = useState<string[] | null>(null);
   const [finishing, setFinishing] = useState(false);
   const [warnChampion, setWarnChampion] = useState<string | null>(null);
+  const columnsKey = gen.genome_ids.join(",");
   useEffect(() => {
-    setPicks(gen.picks);
-    setNoneChosen(false);
-  }, [gen.index]);
+    setWinners([]);
+    setSeedRow(0);
+  }, [gen.index, columnsKey]);
 
   const done = gen.status === "done";
   const total = gen.seeds.length * gen.genome_ids.length;
   const pending = c.info.pending;
   const untouched = pending === total && !running;
-  const limitReached = done && gen.index + 1 >= c.info.generation_limit;
+  const limit = c.info.generation_limit;
+  const limitReached = done && gen.index + 1 >= limit;
   const stageLabel = stagePrefix(c.info.stage);
+  const { matches, open, picks } = bracket(gen.genome_ids, winners);
+  const match = open >= 0 ? matches[open] : undefined;
+  const row = Math.min(seedRow, gen.seeds.length - 1);
 
-  function toggle(id: string) {
-    if (done) return;
-    setNoneChosen(false);
-    setPicks((p) =>
-      p.includes(id)
-        ? p.filter((x) => x !== id)
-        : p.length >= 2
-          ? [p[0], id]
-          : [...p, id],
-    );
+  function decide(id: string | null) {
+    if (done || busy || open < 0) return;
+    const next = [...winners];
+    next[open] = id;
+    setWinners(next);
+    const result = bracket(gen.genome_ids, next).picks;
+    if (result) submit(result);
   }
-  function submit(force = false) {
-    if (done) return;
-    if (!picks.length && !noneChosen) {
-      setMessage(
-        "마음에 드는 조합을 고르거나 0을 눌러 모두 별로로 표시하세요.",
-      );
-      return;
-    }
+  function undo() {
+    if (done || busy) return;
+    let last = winners.length - 1;
+    while (last >= 0 && winners[last] === undefined) last--;
+    if (last >= 0) setWinners(winners.slice(0, last));
+  }
+  function submit(chosen: string[], force = false) {
     if (pending && !force) {
-      setAskForce(true);
+      setAskForce(chosen);
       return;
     }
     void task(async () => {
-      const r = await exploreApi.pick(c.id, gen.index, picks, force);
+      const r = await exploreApi.pick(c.id, gen.index, chosen, force);
       setCampaign(r.campaign);
       const next = currentGeneration(r.campaign);
       if (!next || next.index === gen.index) {
-        setMessage(`최대 세대에 도달했습니다. ${stageLabel} 완료를 누르세요.`);
+        setFinishing(true);
         return;
       }
+      await run();
+    });
+  }
+  function extend() {
+    void task(async () => {
+      const r = await exploreApi.extend(c.id);
+      setCampaign(r.campaign);
       await run();
     });
   }
@@ -161,15 +172,15 @@ export function EvolveView({
     const key = (event: KeyboardEvent) => {
       if (ignoreKey(event)) return;
       const n = Number(event.key);
-      if (/^[1-9]$/.test(event.key) && n <= gen.genome_ids.length)
-        toggle(gen.genome_ids[n - 1]);
-      else if (event.key === "0" && !done) {
-        setPicks([]);
-        setNoneChosen(true);
-      } else if (event.key === "Enter" && !busy) {
-        if (untouched && !done) startRun();
-        else submit();
-      } else return;
+      if (match && /^[1-3]$/.test(event.key) && n <= match.columns.length)
+        decide(gen.genome_ids[match.columns[n - 1]]);
+      else if (match && event.key === "0") decide(null);
+      else if (event.key === "Backspace") undo();
+      else if (event.key === "ArrowUp") setSeedRow(Math.max(0, row - 1));
+      else if (event.key === "ArrowDown")
+        setSeedRow(Math.min(gen.seeds.length - 1, row + 1));
+      else if (event.key === "Enter" && !busy && untouched && !done) startRun();
+      else return;
       event.preventDefault();
     };
     document.addEventListener("keydown", key);
@@ -182,31 +193,39 @@ export function EvolveView({
       ? groupGenes(c.genomes[parent], group)
       : undefined;
   };
-  const cellAt = (row: number, col: number) => {
+  // The viewer walks the columns of the open match (or the saved picks).
+  const shown = match
+    ? match.columns
+    : gen.picks.map((id) => gen.genome_ids.indexOf(id)).filter((i) => i >= 0);
+  const cellAt = (r: number, i: number) => {
+    const col = shown[i];
     const gid = gen.genome_ids[col];
-    const t = trials.get(cellKey(gid, gen.seeds[row], c.preset));
+    const t = trials.get(cellKey(gid, gen.seeds[r], c.preset));
     return {
       url: t?.image_url || "",
       error: t?.error,
-      caption: `${col + 1}번 조합 · 시드 ${row + 1} (${gen.seeds[row]})`,
+      caption: `${i + 1}번 · 시드 ${r + 1} (${gen.seeds[r]})`,
     };
   };
   const saved = archived(c);
   const lastWinner = saved[0] || "";
+  const finalPicks = done ? gen.picks : picks || [];
 
   return (
     <div className="evolve">
       <div className="evolve-bar">
         <div className="evolve-status" aria-live="polite">
-          <strong>{gen.index}세대</strong>
-          <span>같은 1등 {c.info.streak}회 연속</span>
+          <strong>
+            라운드 {gen.index + 1} / {Math.max(limit, gen.index + 1)}
+          </strong>
+          {c.info.streak > 0 && <span>같은 1등 {c.info.streak}회 연속</span>}
           {c.info.converging && (
             <span className="badge">
               <Sparkles size={12} /> 수렴 모드
             </span>
           )}
           <span className="micro">
-            최대 {c.info.generation_limit}세대 · {c.preset}
+            조합 {gen.genome_ids.length}개 · {c.preset}
             {SIZE_NAMES[c.image_size] && ` · ${SIZE_NAMES[c.image_size]}`}
           </span>
         </div>
@@ -233,10 +252,7 @@ export function EvolveView({
             className={
               c.info.suggest_finish ? "primary finish-suggested" : "outline"
             }
-            disabled={
-              busy ||
-              (!saved.length && !picks.length && !c.frozen[group]?.length)
-            }
+            disabled={busy || (!saved.length && !c.frozen[group]?.length)}
             onClick={() => setFinishing(true)}
           >
             <Flag size={15} />
@@ -244,84 +260,105 @@ export function EvolveView({
           </button>
         </div>
       </div>
-      <p className="micro evolve-help">
-        <kbd>1</kbd>~<kbd>{gen.genome_ids.length}</kbd> 또는 열 클릭으로 선택(첫
-        번째 1등, 두 번째 2등) · <kbd>0</kbd> 모두 별로 · <kbd>Enter</kbd>{" "}
-        저장하고 다음 세대 · 더블클릭 확대
-      </p>
-      {limitReached && (
-        <div className="notice" role="status">
-          최대 세대에 도달했습니다. {stageLabel} 완료를 눌러 우승 조합을
-          확정하세요.
-        </div>
-      )}
-      <div
-        className="evolve-grid"
-        style={{
-          gridTemplateColumns: `56px repeat(${gen.genome_ids.length}, minmax(0, 1fr))`,
-        }}
-        role="grid"
-        aria-label={`${gen.index}세대 비교`}
-      >
-        <div role="presentation" />
-        {gen.genome_ids.map((gid, i) => {
-          const rank = picks.indexOf(gid);
-          const genome = c.genomes[gid];
-          return (
-            <button
-              key={gid}
-              className={"evolve-head" + (rank >= 0 ? " picked" : "")}
-              aria-pressed={rank >= 0}
-              aria-label={`${i + 1}번 조합 ${rank === 0 ? "1등" : rank === 1 ? "2등" : ""}`.trim()}
-              onClick={() => toggle(gid)}
-            >
-              <span className="row">
-                <kbd>{i + 1}</kbd>
-                <span
-                  className={
-                    "origin origin-" +
-                    (gen.origins[i] || "").replace(/^mut_.*/, "mutate")
-                  }
-                >
-                  {originName(gen.origins[i] || genome.origin)}
-                </span>
-                {rank >= 0 && (
-                  <span className="rank-badge">
-                    {rank === 0 ? "1등" : "2등"}
+      {!done && (
+        <ol className="bracket-steps" aria-label="이번 라운드 비교 순서">
+          {matches.map((m, i) => {
+            const w = winners[i];
+            return (
+              <li
+                key={m.key}
+                className={
+                  i === open ? "current" : w !== undefined ? "decided" : ""
+                }
+                aria-current={i === open ? "step" : undefined}
+              >
+                {m.name}
+                {w !== undefined && (
+                  <span className="micro">
+                    {" "}
+                    · {w ? `${gen.genome_ids.indexOf(w) + 1}번` : "모두 별로"}
                   </span>
                 )}
-              </span>
-              <GeneChanges
-                parent={parentGenes(i)}
-                genes={groupGenes(genome, group)}
-              />
+              </li>
+            );
+          })}
+        </ol>
+      )}
+      <p className="micro evolve-help">
+        {done ? (
+          "이번 라운드의 선택이 저장되었습니다."
+        ) : (
+          <>
+            <kbd>1</kbd>~<kbd>{Math.max(2, match?.columns.length || 2)}</kbd>{" "}
+            또는 클릭으로 하나 고르기 · <kbd>0</kbd> 모두 별로 ·{" "}
+            <kbd>Backspace</kbd> 되돌리기
+            {gen.seeds.length > 1 && (
+              <>
+                {" "}
+                · <kbd>↑</kbd> <kbd>↓</kbd> 시드 바꾸기
+              </>
+            )}{" "}
+            · 더블클릭 확대
+          </>
+        )}
+      </p>
+      {limitReached && (
+        <div className="notice row" role="status">
+          <span>
+            {limit}라운드를 마쳤습니다. 우승 조합으로 {stageLabel}를 마치거나 한
+            라운드 더 고르세요.
+          </span>
+          <button className="outline" disabled={busy} onClick={extend}>
+            한 라운드 더
+          </button>
+          <button
+            className="primary"
+            disabled={busy}
+            onClick={() => setFinishing(true)}
+          >
+            <Flag size={15} /> {stageLabel} 완료
+          </button>
+        </div>
+      )}
+      {gen.seeds.length > 1 && (
+        <div className="seed-tabs" role="tablist" aria-label="시드">
+          {gen.seeds.map((seed, i) => (
+            <button
+              key={seed}
+              role="tab"
+              aria-selected={i === row}
+              className={i === row ? "primary" : "outline"}
+              onClick={() => setSeedRow(i)}
+            >
+              시드 {i + 1}
             </button>
-          );
-        })}
-        {gen.seeds.map((seed, row) => (
-          <Row key={seed} label={`시드 ${row + 1}`}>
-            {gen.genome_ids.map((gid, col) => {
-              const t = trials.get(cellKey(gid, seed, c.preset));
-              return (
+          ))}
+        </div>
+      )}
+      {match && match.columns.length > 0 ? (
+        <div
+          className="match"
+          style={{
+            gridTemplateColumns: `repeat(${match.columns.length}, minmax(0, 1fr))`,
+          }}
+          role="group"
+          aria-label={`${gen.index + 1}라운드 ${match.name}`}
+        >
+          {match.columns.map((col, i) => {
+            const gid = gen.genome_ids[col];
+            const genome = c.genomes[gid];
+            const t = trials.get(cellKey(gid, gen.seeds[row], c.preset));
+            return (
+              <div key={gid} className="match-card">
                 <button
-                  key={gid}
-                  role="gridcell"
-                  className={
-                    "evolve-cell" +
-                    (picks.includes(gid) ? " picked" : "") +
-                    (noneChosen ? " dimmed" : "")
-                  }
-                  aria-label={`${col + 1}번 조합 · 시드 ${row + 1}`}
-                  onClick={() => toggle(gid)}
-                  onDoubleClick={() => setViewer({ row, col })}
+                  className="evolve-cell match-image"
+                  aria-label={`${i + 1}번 고르기`}
+                  disabled={busy}
+                  onClick={() => decide(gid)}
+                  onDoubleClick={() => setViewer({ row, col: i })}
                 >
                   {t && !t.error ? (
-                    <img
-                      src={t.image_url}
-                      alt=""
-                      draggable={false}
-                      loading="lazy"
-                    />
+                    <img src={t.image_url} alt="" draggable={false} />
                   ) : t?.error ? (
                     <span className="cell-empty error-text">오류</span>
                   ) : (
@@ -332,36 +369,82 @@ export function EvolveView({
                     </span>
                   )}
                 </button>
+                <div className="match-info">
+                  <span className="row">
+                    <kbd>{i + 1}</kbd>
+                    <span
+                      className={
+                        "origin origin-" +
+                        (gen.origins[col] || "").replace(/^mut_.*/, "mutate")
+                      }
+                    >
+                      {originName(gen.origins[col] || genome.origin)}
+                    </span>
+                  </span>
+                  <GeneChanges
+                    parent={parentGenes(col)}
+                    genes={groupGenes(genome, group)}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="match match-result" role="status">
+          {finalPicks.length ? (
+            finalPicks.map((gid, i) => {
+              const col = gen.genome_ids.indexOf(gid);
+              const t = trials.get(cellKey(gid, gen.seeds[row], c.preset));
+              return (
+                <div key={gid} className="match-card picked">
+                  <div
+                    className="evolve-cell match-image"
+                    onDoubleClick={() => setViewer({ row, col: i })}
+                  >
+                    {t && !t.error && (
+                      <img src={t.image_url} alt="" draggable={false} />
+                    )}
+                  </div>
+                  <div className="match-info">
+                    <span className="row">
+                      <span className="rank-badge">
+                        {i === 0 ? "1등" : "2등"}
+                      </span>
+                    </span>
+                    <GeneChanges
+                      parent={parentGenes(col)}
+                      genes={groupGenes(c.genomes[gid], group)}
+                    />
+                  </div>
+                </div>
               );
-            })}
-          </Row>
-        ))}
-      </div>
-      <div className="evolve-footer">
-        {noneChosen ? (
-          <span className="badge">
-            <ThumbsDown size={12} /> 모두 별로
-          </span>
-        ) : (
-          <span className="micro">
-            {done ? "저장된 선택" : "선택"}:{" "}
-            {picks.length
-              ? picks
-                  .map((p) => `${gen.genome_ids.indexOf(p) + 1}번`)
-                  .join(" > ")
-              : "없음"}
-          </span>
-        )}
-        {!done && (
+            })
+          ) : (
+            <span className="badge">
+              <ThumbsDown size={12} /> 모두 별로
+            </span>
+          )}
+        </div>
+      )}
+      {!done && match && (
+        <div className="evolve-footer">
           <button
-            className="primary"
-            disabled={busy || (!picks.length && !noneChosen)}
-            onClick={() => submit()}
+            className="outline"
+            disabled={busy || !winners.some((w) => w !== undefined)}
+            onClick={undo}
           >
-            선택 저장 · 다음 세대
+            <Undo2 size={15} /> 되돌리기
           </button>
-        )}
-      </div>
+          <button
+            className="outline"
+            disabled={busy}
+            onClick={() => decide(null)}
+          >
+            <ThumbsDown size={15} /> 모두 별로
+          </button>
+        </div>
+      )}
       {saved.length > 0 && (
         <details className="evolve-archive">
           <summary>
@@ -384,55 +467,50 @@ export function EvolveView({
                   }
                 >
                   {gen.genome_ids.includes(gid)
-                    ? "이번 세대에 있음"
-                    : "이번 세대에 다시 넣기"}
+                    ? "이번 라운드에 있음"
+                    : "이번 라운드에 다시 넣기"}
                 </button>
               </li>
             ))}
           </ul>
         </details>
       )}
-      {viewer && (
+      {viewer && shown.length > 0 && (
         <ExploreViewer
-          title={`${gen.index}세대 · 이미지 확대`}
+          title={`${gen.index + 1}라운드 · 이미지 확대`}
           row={viewer.row}
-          col={viewer.col}
+          col={Math.min(viewer.col, shown.length - 1)}
           rows={gen.seeds.length}
-          cols={gen.genome_ids.length}
+          cols={shown.length}
           cell={cellAt}
-          move={(row, col) => setViewer({ row, col })}
+          move={(r, col) => {
+            setViewer({ row: r, col });
+            setSeedRow(r);
+          }}
           close={() => setViewer(null)}
           extraKeys={(event) => {
             const n = Number(event.key);
-            if (!/^[1-9]$/.test(event.key) || n > gen.genome_ids.length)
+            if (!match || !/^[1-3]$/.test(event.key) || n > shown.length)
               return false;
-            toggle(gen.genome_ids[n - 1]);
+            setViewer(null);
+            decide(gen.genome_ids[shown[n - 1]]);
             return true;
           }}
-          footer={(() => {
-            const gid = gen.genome_ids[viewer.col];
-            const rank = picks.indexOf(gid);
-            return (
-              <>
-                <strong>{viewer.col + 1}번 조합</strong>
-                {rank >= 0 && (
-                  <span className="rank-badge">
-                    {rank === 0 ? "1등" : "2등"}
-                  </span>
-                )}
-              </>
-            );
-          })()}
+          footer={<strong>{viewer.col + 1}번</strong>}
         />
       )}
       {askForce && (
         <ConfirmDialog
           title="있는 것만으로 진행할까요?"
           confirmLabel="있는 것만으로 진행"
-          cancel={() => setAskForce(false)}
+          cancel={() => {
+            setAskForce(null);
+            undo();
+          }}
           confirm={() => {
-            setAskForce(false);
-            submit(true);
+            const chosen = askForce;
+            setAskForce(null);
+            submit(chosen, true);
           }}
         >
           아직 {pending}장이 생성되지 않았습니다. 진행하면 남은 생성은 중지되고
@@ -443,8 +521,8 @@ export function EvolveView({
         <FinishDialog
           c={c}
           group={group}
-          options={[...new Set([...picks, ...saved])]}
-          initial={picks[0] || lastWinner}
+          options={[...new Set([...finalPicks, ...saved])]}
+          initial={finalPicks[0] || lastWinner}
           close={() => setFinishing(false)}
           finish={(id) => {
             setFinishing(false);
@@ -465,17 +543,6 @@ export function EvolveView({
         />
       )}
     </div>
-  );
-}
-
-function Row({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <>
-      <div className="evolve-row-label" role="rowheader">
-        {label}
-      </div>
-      {children}
-    </>
   );
 }
 

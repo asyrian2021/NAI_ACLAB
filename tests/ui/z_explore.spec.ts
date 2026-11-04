@@ -116,78 +116,97 @@ test("combination search runs from evolution through a round to a fixed combinat
   await expect(startButton).toBeEnabled();
   await startButton.click();
 
-  const cells = page.locator(".evolve-cell img");
-  await expect(cells).toHaveCount(12, { timeout: 30000 });
-  await expect(page.locator(".evolve-status strong")).toHaveText("0세대");
-  // Keyboard only: pick 1st and 2nd, Enter saves and generates the next generation.
+  // A pick round: 6 combinations × 1 seed, compared 3 at a time.
+  const status = page.locator(".evolve-status strong");
+  const shown = page.locator(".match-image img");
+  const generated = async () => {
+    await expect(page.locator(".evolve-bar .spin")).toHaveCount(0, {
+      timeout: 30000,
+    });
+  };
+  await expect(shown).toHaveCount(3, { timeout: 30000 });
+  await generated();
+  await expect(status).toHaveText("라운드 1 / 3");
+  await expect(page.locator(".bracket-steps li")).toHaveText([
+    "1조",
+    "2조",
+    "결승",
+  ]);
+  // Keyboard only: one per heat (Backspace undoes), then the final.
   await page.keyboard.press("2");
-  await page.keyboard.press("5");
-  await expect(page.locator(".rank-badge")).toHaveText(["1등", "2등"]);
-  await page.keyboard.press("Enter");
-  await expect(page.locator(".evolve-status strong")).toHaveText("1세대");
-  await expect(cells).toHaveCount(12, { timeout: 30000 });
-  await expect(page.locator(".evolve-head .origin")).toHaveText([
+  await expect(page.locator(".bracket-steps li.current")).toHaveText("2조");
+  await page.keyboard.press("Backspace");
+  await expect(page.locator(".bracket-steps li.current")).toHaveText("1조");
+  await page.keyboard.press("2");
+  await page.keyboard.press("3");
+  await expect(page.locator(".bracket-steps li.current")).toHaveText("결승");
+  await expect(shown).toHaveCount(2);
+  await page.keyboard.press("1");
+  await expect(status).toHaveText("라운드 2 / 3");
+  await expect(shown).toHaveCount(3, { timeout: 30000 });
+  await generated();
+  // First and second place came back as elites, then their crossover.
+  await expect(page.locator(".match-info .origin")).toHaveText([
     "엘리트",
     "엘리트",
     "교차",
-    "변이",
-    "변이",
-    "랜덤",
   ]);
+  // A heat that is all bad sends nobody on, so there is no final.
   await page.keyboard.press("1");
-  await page.keyboard.press("Enter");
-  await expect(page.locator(".evolve-status strong")).toHaveText("2세대");
-  await expect(cells).toHaveCount(12, { timeout: 30000 });
+  await page.keyboard.press("0");
+  await expect(status).toHaveText("라운드 3 / 3");
+  await expect(page.locator(".evolve-status")).toContainText("수렴 모드");
+  await expect(shown).toHaveCount(3, { timeout: 30000 });
+  await generated();
 
   // The campaign and its pick history survive a reload.
   await page.reload();
   await nav.getByRole("button", { name: "탐색", exact: true }).click();
   await page.getByRole("button", { name: /e2e 탐색/ }).click();
-  await expect(page.locator(".evolve-status strong")).toHaveText("2세대");
-  await page.keyboard.press("1");
-  await page.getByRole("button", { name: "1단계 완료" }).click();
-  await page.getByRole("button", { name: "이 조합으로 확정" }).click();
+  await expect(status).toHaveText("라운드 3 / 3");
+  // The last round opens the finish dialog; one more round is still possible.
+  for (const key of ["1", "1", "1"]) await page.keyboard.press(key);
+  const finish = page.getByRole("alertdialog", { name: /단계를 마칠까요\?$/ });
+  await expect(finish).toBeVisible();
+  await finish.getByRole("button", { name: "취소" }).click();
+  await page.getByRole("button", { name: "한 라운드 더" }).click();
+  await expect(status).toHaveText("라운드 4 / 4");
+  await expect(shown).toHaveCount(3, { timeout: 30000 });
+  await generated();
+  for (const key of ["1", "1", "1"]) await page.keyboard.press(key);
+  await finish.getByRole("button", { name: "이 조합으로 확정" }).click();
   // Only one scene exists, so the rate stage asks before starting.
   await expect(
     page.getByRole("alertdialog", { name: "검증할 장면이 부족합니다" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "그래도 진행" }).click();
 
-  // Stage 2 round 1: 8 candidates × 1 scene × 2 seeds.
+  // Stage 2 round 1: 8 candidates × 1 scene × 2 seeds, looked at one by one.
   await page.getByRole("button", { name: "16장 생성" }).click();
   await expect(page.locator(".round-cell img")).toHaveCount(16, {
     timeout: 30000,
   });
+  const current = page.locator(".round-stage-head");
+  await expect(current.locator("strong")).toHaveText("후보 A");
   await page.keyboard.press("1");
   await expect(page.locator(".round-cell.failed")).toHaveCount(1);
   await expect(page.locator(".candidate-rate").first()).toHaveText(
     /성공 1\/2 · 50%/,
   );
-  // Browser focus follows the highlight, so a clicked cell or button does not
-  // keep a second focus ring while the arrow keys move on.
-  const focusIsOnHighlight = () =>
-    page.evaluate(
-      () =>
-        document.activeElement?.classList.contains("round-cell") &&
-        document.activeElement.classList.contains("focused"),
-    );
-  await page.locator(".round-cell").nth(3).click();
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("ArrowLeft");
-  await expect(page.locator(".round-cell.focused")).toHaveAttribute(
-    "aria-label",
-    /^후보 C · .* · 시드 1$/,
+  // 1 of 2 failed: A cannot reach 70% any more, so its other image is skipped.
+  await expect(current.locator("strong")).toHaveText("후보 B");
+  await expect(page.locator(".review-progress")).toHaveText(
+    "확인 0/14 · 기준 미달로 건너뜀: 후보 A",
   );
-  expect(await focusIsOnHighlight()).toBe(true);
-  const firstLabel = page
-    .getByRole("group", { name: "실패 라벨" })
-    .getByRole("button")
-    .first();
-  await firstLabel.click();
-  await firstLabel.click();
-  await page.keyboard.press("ArrowRight");
-  expect(await focusIsOnHighlight()).toBe(true);
-  await expect(page.locator(".round-cell:focus")).toHaveCount(1);
+  await expect(page.locator(".badge.danger")).toHaveCount(1);
+  await page.keyboard.press(" ");
+  await expect(current).toContainText("시드 2");
+  await page.keyboard.press("ArrowLeft");
+  await expect(current).toContainText("시드 1");
+  await page.keyboard.press(" ");
+  await page.keyboard.press(" ");
+  await expect(current.locator("strong")).toHaveText("후보 C");
+  await expect(page.locator(".review-progress")).toContainText("확인 2/14");
   await page.getByRole("button", { name: "라운드 마감" }).click();
   await expect(page.locator(".evolve-status strong")).toHaveText("R2 / 3");
   // A candidate can be confirmed mid-way, without running the remaining rounds.

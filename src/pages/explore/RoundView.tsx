@@ -1,5 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
   LoaderCircle,
   Play,
   RotateCcw,
@@ -28,10 +31,17 @@ import {
   trialMap,
 } from "./lib";
 
-/** Success-rate interval as a bar: the band is the 90% interval, the tick the observed rate. */
-function IntervalBar({ s }: { s?: GenomeStats }) {
+/** Success-rate interval as a bar: the band is the 90% interval, the tick the observed rate, the line the pass rate. */
+function IntervalBar({ s, pass }: { s?: GenomeStats; pass?: number }) {
+  const line = pass !== undefined && (
+    <span className="pass-line" style={{ left: pct(pass) }} />
+  );
   if (!s || !s.n)
-    return <div className="interval-bar no-data" aria-hidden="true" />;
+    return (
+      <div className="interval-bar no-data" aria-hidden="true">
+        {line}
+      </div>
+    );
   return (
     <div className="interval-bar" aria-hidden="true">
       <span
@@ -39,8 +49,39 @@ function IntervalBar({ s }: { s?: GenomeStats }) {
         style={{ left: pct(s.low), width: pct(s.high - s.low) }}
       />
       <span className="tick" style={{ left: pct(s.rate) }} />
+      {line}
     </div>
   );
+}
+
+type Cell = { gid: string; scene: string; seed: number; si: number };
+
+/** Images marked as looked at, kept per round so a reload resumes where it was. */
+function useReviewed(storageKey: string) {
+  const [reviewed, setReviewed] = useState<Set<string>>(() => read());
+  function read() {
+    try {
+      return new Set<string>(
+        JSON.parse(localStorage.getItem(storageKey) || "[]"),
+      );
+    } catch {
+      return new Set<string>();
+    }
+  }
+  useEffect(() => setReviewed(read()), [storageKey]);
+  function mark(key: string) {
+    setReviewed((prev) => {
+      if (prev.has(key)) return prev;
+      const next = new Set(prev).add(key);
+      try {
+        localStorage.setItem(storageKey, JSON.stringify([...next]));
+      } catch {
+        /* Storage full or blocked: the session still remembers. */
+      }
+      return next;
+    });
+  }
+  return [reviewed, mark] as const;
 }
 
 export function RoundView({
@@ -60,11 +101,13 @@ export function RoundView({
   const trials = trialMap(c, stage, r.index);
   const stats = c.info.stats[stage] || {};
   const codes = failureCodes(c.info.stage);
+  const passRate = c.info.pass_rate ?? 0.7;
+  const level = (r.level ?? -1) >= 0 ? r.level! : r.index;
+  const attempt = r.attempt || 0;
   const columns = r.scenes.flatMap((scene) =>
     r.seeds.map((seed, si) => ({ scene, seed, si })),
   );
   const rows = r.genome_ids;
-  const [focus, setFocus] = useState({ row: 0, col: 0 });
   const [ask, setAsk] = useState<"" | "force" | "skip" | "scenes" | "early">(
     "",
   );
@@ -73,7 +116,9 @@ export function RoundView({
   const latestLabel = useRef(0);
   const latest = useRef(c);
   latest.current = c;
-  const focusedCell = useRef<HTMLButtonElement>(null);
+  const [reviewed, markReviewed] = useReviewed(
+    `explore-reviewed:${c.id}:${stage}:${r.index}`,
+  );
 
   const total =
     columns.length * rows.filter((g) => !r.eliminated.includes(g)).length;
@@ -82,31 +127,71 @@ export function RoundView({
   const finalists = r.result.finalists || [];
   const name = (gid: string) =>
     confirmStage ? "최종 조합" : `후보 ${letters.get(gid) || "?"}`;
-  const focusGid = rows[Math.min(focus.row, rows.length - 1)];
-  const focusCol = columns[Math.min(focus.col, columns.length - 1)];
-  const focused =
-    focusCol && trials.get(cellKey(focusGid, focusCol.seed, focusCol.scene));
 
-  // Browser focus follows the highlighted cell. Otherwise a cell (or button)
-  // clicked earlier keeps its own focus ring once a key is pressed, and the
-  // grid shows two cursors.
-  const keyboardMove = useRef(false);
-  function takeFocus() {
-    const cell = focusedCell.current;
-    if (cell && document.activeElement !== cell)
-      cell.focus({ preventScroll: true });
+  /** Even if every image still to come succeeds, this candidate stays under the pass rate. */
+  function doomed(gid: string) {
+    if (confirmStage) return false;
+    // Counted from the trials, so a label just set counts before the server replies.
+    const mine = c.trials.filter(
+      (t) => t.stage === stage && t.genome_id === gid && !t.error,
+    );
+    const s = {
+      s: mine.filter((t) => !t.failures.length).length,
+      n: mine.length,
+    };
+    const missing = columns.filter((col) => {
+      const t = trials.get(cellKey(gid, col.seed, col.scene));
+      return !t || !!t.error;
+    }).length;
+    const n = s.n + missing;
+    return n > 0 && (s.s + missing) / n < passRate - 1e-9;
   }
-  useEffect(() => {
-    if (keyboardMove.current) takeFocus();
-    keyboardMove.current = false;
-    focusedCell.current?.scrollIntoView({
-      block: "nearest",
-      inline: "nearest",
-    });
-  }, [focus.row, focus.col]);
+  const cells: Cell[] = useMemo(
+    () => rows.flatMap((gid) => columns.map((col) => ({ gid, ...col }))),
+    [rows.join(","), columns.map((x) => x.scene + x.seed).join(",")],
+  );
+  const inQueue = (cell: Cell) =>
+    !r.eliminated.includes(cell.gid) && !doomed(cell.gid);
+  const queue = cells.filter(inQueue);
+  const keyOf = (cell: Cell) => cellKey(cell.gid, cell.seed, cell.scene);
+  const [current, setCurrent] = useState("");
+  // Start (and move on, when a candidate drops out) at the first image not looked at.
+  const position = cells.findIndex((cell) => keyOf(cell) === current);
+  const focusCell =
+    position >= 0 && inQueue(cells[position])
+      ? cells[position]
+      : (cells
+          .slice(Math.max(0, position))
+          .find((cell) => inQueue(cell) && !reviewed.has(keyOf(cell))) ??
+        queue.find((cell) => !reviewed.has(keyOf(cell))) ??
+        queue.at(-1) ??
+        cells[0]);
+  const focusKey = focusCell ? keyOf(focusCell) : "";
+  const focused = focusCell ? trials.get(focusKey) : undefined;
+  const focusGid = focusCell?.gid;
+  const checked = queue.filter((cell) => reviewed.has(keyOf(cell))).length;
+  const allChecked = queue.length > 0 && checked === queue.length && !pending;
+  const skipped = rows.filter(
+    (gid) => !r.eliminated.includes(gid) && doomed(gid),
+  );
+
+  function step(delta: 1 | -1) {
+    if (!focusCell) return;
+    if (delta === 1) markReviewed(focusKey);
+    const at = cells.indexOf(focusCell);
+    const list =
+      delta === 1 ? cells.slice(at + 1) : cells.slice(0, at).reverse();
+    const next =
+      list.find(
+        (cell) => inQueue(cell) && (delta === -1 || !reviewed.has(keyOf(cell))),
+      ) ?? list.find(inQueue);
+    if (next) setCurrent(keyOf(next));
+  }
 
   function toggleLabel(trial: Trial | undefined, code: string) {
     if (!trial || trial.error || done) return;
+    markReviewed(cellKey(trial.genome_id, trial.seed, trial.scene));
+    setCurrent(cellKey(trial.genome_id, trial.seed, trial.scene));
     const failures = trial.failures.includes(code)
       ? trial.failures.filter((f) => f !== code)
       : [...trial.failures, code];
@@ -131,34 +216,19 @@ export function RoundView({
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (ignoreKey(event)) return;
-      const lastRow = rows.length - 1,
-        lastCol = columns.length - 1;
-      if (event.key === "ArrowLeft")
-        setFocus((f) => ({ ...f, col: Math.max(0, f.col - 1) }));
-      else if (event.key === "ArrowRight")
-        setFocus((f) => ({ ...f, col: Math.min(lastCol, f.col + 1) }));
-      else if (event.key === "ArrowUp")
-        setFocus((f) => ({ ...f, row: Math.max(0, f.row - 1) }));
-      else if (event.key === "ArrowDown")
-        setFocus((f) => ({ ...f, row: Math.min(lastRow, f.row + 1) }));
-      else if (event.key === " ")
-        setFocus((f) =>
-          f.col < lastCol
-            ? { ...f, col: f.col + 1 }
-            : {
-                row: Math.min(lastRow, f.row + 1),
-                col: f.row < lastRow ? 0 : f.col,
-              },
-        );
+      if (
+        event.key === "ArrowRight" ||
+        event.key === " " ||
+        event.key === "Enter"
+      )
+        step(1);
+      else if (event.key === "ArrowLeft") step(-1);
       else {
         const code = codes.find((f) => f.key === event.key);
         if (!code) return;
         toggleLabel(focused, code.code);
       }
       event.preventDefault();
-      // Same cell (edge of the grid, or a label key): the effect will not run.
-      takeFocus();
-      keyboardMove.current = true;
     };
     document.addEventListener("keydown", key);
     return () => document.removeEventListener("keydown", key);
@@ -173,17 +243,22 @@ export function RoundView({
       await saving.current;
       const reply = await exploreApi.closeRound(c.id, force);
       setCampaign(reply.campaign);
-      setFocus({ row: 0, col: 0 });
+      setCurrent("");
+      const res = reply.round;
       if (confirmStage) setMessage("최종 확인을 마쳤습니다.");
-      else if (reply.round.next_round !== undefined)
+      else if (res.retry !== undefined)
         setMessage(
-          `R${reply.round.next_round}을 마감했습니다. 상위 후보로 R${reply.round.next_round + 1}을 시작하세요.`,
+          `통과 기준 ${pct(passRate)}을 넘은 후보가 없습니다(최고 ${pct(res.best_rate || 0)}). 가장 나았던 후보의 변형과 새 조합으로 R1을 다시 시작합니다.`,
+        );
+      else if (res.next_round !== undefined)
+        setMessage(
+          `R${res.next_round}을 마감했습니다. ${pct(passRate)} 이상인 후보로 R${res.next_round + 1}을 시작하세요.`,
         );
       else setMessage("마지막 라운드를 마감했습니다. 우승 조합을 고르세요.");
     });
   }
-  function advance(champion: string, checked = false, skipNext = false) {
-    if (!checked && needsSceneWarning(c)) {
+  function advance(champion: string, checkedScenes = false, skipNext = false) {
+    if (!checkedScenes && needsSceneWarning(c)) {
       setChosen(champion);
       setAsk("scenes");
       return;
@@ -203,7 +278,12 @@ export function RoundView({
   const stageCandidates = [...letters.keys()];
   const roundTitle = confirmStage
     ? "최종 확인"
-    : `R${r.index + 1} / ${c.info.round_count}`;
+    : `R${level + 1} / ${c.info.round_count}` +
+      (attempt ? ` · 재도전 ${attempt}회차` : "");
+  const candidateCells = focusGid
+    ? queue.filter((cell) => cell.gid === focusGid)
+    : [];
+  const candidateIndex = focusCell ? candidateCells.indexOf(focusCell) : -1;
 
   return (
     <div className="round">
@@ -214,9 +294,9 @@ export function RoundView({
             후보 {rows.length - r.eliminated.length}개 · 장면 {r.scenes.length}
             개 × 시드 {r.seeds.length}개
           </span>
-          <span className="micro">
-            실패만 표시하세요. 표시하지 않은 이미지는 성공으로 셉니다.
-          </span>
+          {!confirmStage && (
+            <span className="badge">통과 기준 {pct(passRate)}</span>
+          )}
         </div>
         <div className="row">
           {running ? (
@@ -249,7 +329,7 @@ export function RoundView({
                 있는 것만으로 진행
               </button>
               <button
-                className="primary"
+                className={"primary" + (allChecked ? " finish-suggested" : "")}
                 disabled={busy || !!pending}
                 onClick={() => closeRound()}
               >
@@ -273,14 +353,29 @@ export function RoundView({
             <div className="round-stage-head">
               <strong>{focusGid && name(focusGid)}</strong>
               <span className="micro">
-                {focusCol && `${focusCol.scene} · 시드 ${focusCol.si + 1}`}
+                {focusCell &&
+                  `${focusCell.scene} · 시드 ${focusCell.si + 1}` +
+                    (candidateIndex >= 0
+                      ? ` · 이 후보 ${candidateIndex + 1}/${candidateCells.length}`
+                      : "")}
+              </span>
+              <span className="micro review-progress" role="status">
+                확인 {checked}/{queue.length}
+                {skipped.length > 0 &&
+                  ` · 기준 미달로 건너뜀: ${skipped.map(name).join(", ")}`}
               </span>
             </div>
+            {allChecked && !done && (
+              <div className="notice" role="status">
+                <Check size={14} /> 남은 이미지를 모두 확인했습니다. 라운드를
+                마감하세요.
+              </div>
+            )}
             {focused && !focused.error ? (
               <ZoomableImage
                 className="round-stage-image"
                 src={focused.image_url}
-                alt={`${name(focusGid)} 결과`}
+                alt={`${focusGid ? name(focusGid) : ""} 결과`}
               />
             ) : (
               <div className="round-stage-image">
@@ -294,6 +389,14 @@ export function RoundView({
               </div>
             )}
             <div className="label-buttons" role="group" aria-label="실패 라벨">
+              <button
+                className="outline"
+                aria-label="이전 이미지"
+                disabled={!focusCell}
+                onClick={() => step(-1)}
+              >
+                <ArrowLeft size={15} />
+              </button>
               {codes.map((f) => (
                 <button
                   key={f.code}
@@ -309,12 +412,24 @@ export function RoundView({
                   {f.label}
                 </button>
               ))}
+              <button
+                className="primary"
+                disabled={!focusCell}
+                onClick={() => step(1)}
+              >
+                {focused?.failures.length ? "다음" : "괜찮음 · 다음"}
+                <ArrowRight size={15} />
+              </button>
             </div>
             <p className="micro">
-              ← → ↑ ↓ 이동 · Space 다음 이미지 · 숫자 키로 라벨 토글(즉시 저장)
+              한 장씩 봅니다. 실패만 숫자 키로 표시하고 <kbd>Space</kbd>·
+              <kbd>→</kbd>로 넘기세요(표시하지 않은 이미지는 성공). 남은
+              이미지가 다 성공해도 {pct(passRate)}에 못 미치는 후보는 자동으로
+              건너뜁니다.
             </p>
           </div>
-          <div className="round-grid-wrap">
+          <details className="round-grid-wrap">
+            <summary>전체 이미지 보기 ({total}장)</summary>
             <div
               className="round-grid"
               role="grid"
@@ -334,8 +449,8 @@ export function RoundView({
                   {scene}
                 </div>
               ))}
-              {rows.map((gid, row) => {
-                const out = r.eliminated.includes(gid);
+              {rows.map((gid) => {
+                const out = r.eliminated.includes(gid) || doomed(gid);
                 return (
                   <div
                     className={"round-row" + (out ? " out" : "")}
@@ -346,13 +461,13 @@ export function RoundView({
                       {name(gid)}
                     </div>
                     {columns.map((col, ci) => {
-                      const t = trials.get(cellKey(gid, col.seed, col.scene));
-                      const isFocus = focus.row === row && focus.col === ci;
+                      const key = cellKey(gid, col.seed, col.scene);
+                      const t = trials.get(key);
+                      const isFocus = key === focusKey;
                       return (
                         <button
                           key={ci}
-                          ref={isFocus ? focusedCell : undefined}
-                          tabIndex={isFocus ? 0 : -1}
+                          tabIndex={-1}
                           role="gridcell"
                           aria-selected={isFocus}
                           aria-label={`${name(gid)} · ${col.scene} · 시드 ${col.si + 1}${t?.failures.length ? " · 실패" : ""}`}
@@ -362,7 +477,7 @@ export function RoundView({
                             (t?.failures.length ? " failed" : "") +
                             (t?.error ? " void" : "")
                           }
-                          onClick={() => setFocus({ row, col: ci })}
+                          onClick={() => setCurrent(key)}
                         >
                           {t && !t.error ? (
                             <img
@@ -388,7 +503,7 @@ export function RoundView({
                 );
               })}
             </div>
-          </div>
+          </details>
         </section>
         <aside className="round-summary" aria-label="후보별 성공률">
           <h3>후보별 성공률</h3>
@@ -397,6 +512,7 @@ export function RoundView({
               const s = stats[gid];
               const inRound = rows.includes(gid);
               const out = !inRound || r.eliminated.includes(gid);
+              const below = inRound && !out && doomed(gid);
               const genome = c.genomes[gid];
               return (
                 <li
@@ -404,6 +520,7 @@ export function RoundView({
                   className={
                     "candidate" +
                     (out ? " out" : "") +
+                    (below ? " below" : "") +
                     (finalists.includes(gid) ? " finalist" : "")
                   }
                 >
@@ -414,16 +531,19 @@ export function RoundView({
                         c.rounds.find((x) => x.stage === stage)
                           ?.genome_ids[0] &&
                       !confirmStage && <span className="badge">기준</span>}
+                    {below && <span className="badge danger">기준 미달</span>}
                     {!confirmStage &&
                       !done &&
                       (out ? (
-                        <button
-                          className="text-button"
-                          onClick={() => setGenome(gid, "revive")}
-                        >
-                          <RotateCcw size={13} />
-                          되살리기
-                        </button>
+                        inRound && (
+                          <button
+                            className="text-button"
+                            onClick={() => setGenome(gid, "revive")}
+                          >
+                            <RotateCcw size={13} />
+                            되살리기
+                          </button>
+                        )
                       ) : (
                         <button
                           className="text-button"
@@ -436,7 +556,10 @@ export function RoundView({
                       ))}
                   </div>
                   <span className="candidate-rate">{statsText(s)}</span>
-                  <IntervalBar s={s} />
+                  <IntervalBar
+                    s={s}
+                    pass={confirmStage ? undefined : passRate}
+                  />
                   {reasonsText(s) && (
                     <span className="micro">{reasonsText(s)}</span>
                   )}
@@ -495,9 +618,11 @@ export function RoundView({
             <Trophy size={18} /> 우승 조합 고르기
           </h2>
           <p className="micro">
-            {r.result.overlap
-              ? "두 후보의 90% 구간이 겹쳐 통계적으로 구분되지 않습니다. 취향으로 고르세요."
-              : "구간이 겹치지 않아 상위 후보를 추천합니다."}
+            {finalists.length < 2
+              ? `${pct(passRate)} 기준을 끝까지 통과한 후보입니다.`
+              : r.result.overlap
+                ? "두 후보의 90% 구간이 겹쳐 통계적으로 구분되지 않습니다. 취향으로 고르세요."
+                : "구간이 겹치지 않아 상위 후보를 추천합니다."}
           </p>
           <div className="round-final-options">
             {finalists.map((gid) => (
@@ -515,7 +640,7 @@ export function RoundView({
                   )}
                 </strong>
                 <span>{statsText(stats[gid])}</span>
-                <IntervalBar s={stats[gid]} />
+                <IntervalBar s={stats[gid]} pass={passRate} />
                 {group && (
                   <GeneChanges genes={groupGenes(c.genomes[gid], group)} />
                 )}
@@ -575,7 +700,7 @@ export function RoundView({
           }}
         >
           지금까지 결과: {statsText(stats[chosen])}.{" "}
-          {r.index + 1 < c.info.round_count
+          {level + 1 < c.info.round_count
             ? "남은 라운드를 건너뛰고 "
             : "라운드를 마감하지 않고 "}
           이 후보를 우승 조합으로 정한 뒤 다음 단계로 넘어갑니다.

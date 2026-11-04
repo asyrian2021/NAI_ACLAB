@@ -405,6 +405,8 @@ def explore_post(route, data):
         elif route == '/api/explore/reopen':
             stop_campaign_jobs(c.id)
             explore.reopen_stage(c, state, str(data.get('stage', '')), rng)
+        elif route == '/api/explore/extend':
+            explore.extend_generation(c, state, rng)
         elif route == '/api/explore/label':
             explore.label_trial(c, str(data.get('trial_id', '')), list(data.get('failures') or []))
         elif route == '/api/explore/genome':

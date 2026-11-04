@@ -1,8 +1,10 @@
 """Combination search (campaigns).
 
 A campaign has a plan: every artist group (Category) gets a search mode.
-  - pick:  evolve the group from side-by-side picks on shared seeds,
-  - rate:  narrow the group by success rate over labelled trials (8 → 4 → 2),
+  - pick:  evolve the group from picks on shared seeds; the screen runs each generation as a small
+           bracket (2–3 combinations at a time) and reports its first and second place,
+  - rate:  narrow the group by success rate over labelled trials (8 → 4 → 2); only candidates at
+           or above `pass_rate` go on, and a round nobody passes starts over with new candidates,
   - fixed: keep one drawn set for the whole search.
 Groups are searched one at a time in plan order; every other group stays in
 `Campaign.frozen`. After the plan, the first pick group is retuned against the
@@ -40,22 +42,24 @@ RETRIES = 20
 
 DEFAULT_PARAMS = {
     "pop_size": 6,
-    "seeds_per_gen": 2,
-    "max_generations": 12,
-    "stop_after_same_winner": 3,
+    "seeds_per_gen": 1,
+    "max_generations": 3,
+    "stop_after_same_winner": 2,
     "converge_after_same_winner": 2,
     "second_op_prob": 0.3,
     "rates": {"mut_weight": .55, "mut_swap": .20, "mut_add": .08, "mut_drop": .08, "mut_reorder": .09},
     "rates_converge": {"mut_weight": .80, "mut_swap": .10, "mut_add": .03, "mut_drop": .03, "mut_reorder": .04},
     "round_candidates": 8,
     "round_seeds": [2, 4, 8],
-    "retune_generations": 4,
+    "retune_generations": 2,
     "confirm_seeds": 4,
     "wilson_z": 1.645,
+    "pass_rate": 0.7,
 }
 PARAM_LIMITS = {"pop_size": (2, 8), "seeds_per_gen": (1, 8), "max_generations": (1, 50), "stop_after_same_winner": (1, 20),
                 "converge_after_same_winner": (1, 20), "round_candidates": (2, 16), "retune_generations": (1, 20),
                 "confirm_seeds": (1, 16)}
+FLOAT_LIMITS = {"pass_rate": (0.0, 1.0)}
 
 
 @dataclass
@@ -116,6 +120,8 @@ class Round:                # A round of a rate stage (and the one-candidate con
     stage: str = ""
     eliminated: list[str] = field(default_factory=list)
     result: dict = field(default_factory=dict)  # Final round: finalists, recommended, overlap.
+    level: int = -1          # Step on the `round_seeds` ladder (R1 = 0); -1 in older campaigns (= index).
+    attempt: int = 0         # How many times the stage started over because nobody passed.
 
 
 @dataclass
@@ -274,9 +280,11 @@ def delete_campaign(campaign_id: str) -> None:
 def progress_label(c: Campaign) -> str:
     batch = current_batch(c)
     if isinstance(batch, Generation):
-        return f"{batch.index}세대"
+        return f"라운드 {batch.index + 1}"
     if isinstance(batch, Round):
-        return "확인" if c.stage == "confirm" else f"R{batch.index + 1}"
+        if c.stage == "confirm":
+            return "확인"
+        return f"R{round_level(batch) + 1}" + (f" 재도전 {batch.attempt}" if batch.attempt else "")
     return ""
 
 
@@ -489,8 +497,16 @@ def same_winner_streak(c: Campaign, stage: str | None = None) -> int:
     return streak
 
 
-def is_converging(c: Campaign) -> bool:
-    return c.stage == "retune" or same_winner_streak(c) >= int(c.params["converge_after_same_winner"])
+def is_converging(c: Campaign, index: int | None = None) -> bool:
+    """Fine-tuning: the retune, a winner picked twice in a row, or the last generation of a stage
+    (`index`, default the current one) that had room to explore first."""
+    if c.stage == "retune" or same_winner_streak(c) >= int(c.params["converge_after_same_winner"]):
+        return True
+    if index is None:
+        gens = stage_generations(c)
+        index = gens[-1].index if gens else 0
+    limit = generation_limit(c)
+    return limit >= 3 and index >= limit - 1
 
 
 def generation_limit(c: Campaign) -> int:
@@ -576,7 +592,7 @@ def next_generation(c: Campaign, state: AppState, rng: random.Random) -> Generat
         plan = [("elite", a), ("elite", b), ("crossover", (a, b)), ("mutate", a), ("mutate", rng.choice([a, a, b]))]
         plan += [("mutate", a)] * max(0, size - 6) + [("random", None)] * (1 if size >= 6 else 0)
         plan = plan[:size]
-    converge = is_converging(c)
+    converge = is_converging(c, gen.index + 1)
     rates = c.params["rates_converge"] if converge else c.params["rates"]
     return _fill_generation(c, state, plan, gen.index + 1, rng, rates, converge)
 
@@ -595,6 +611,16 @@ def pick(c: Campaign, state: AppState, generation: int, picks: list[str], rng: r
     gen.picks, gen.status = picks, "done"
     if len(stage_generations(c)) >= generation_limit(c):
         return None
+    nxt = next_generation(c, state, rng)
+    c.generations.append(nxt)
+    return nxt
+
+
+def extend_generation(c: Campaign, state: AppState, rng: random.Random) -> Generation:
+    """One more generation past the stage's limit, built from the last picks."""
+    gen = current_batch(c)
+    if not isinstance(gen, Generation) or gen.status != "done":
+        raise ValueError("지금 세대의 선택을 먼저 저장하세요.")
     nxt = next_generation(c, state, rng)
     c.generations.append(nxt)
     return nxt
@@ -657,39 +683,75 @@ def start_round(c: Campaign, state: AppState, rng: random.Random, manual: list[l
     if not scenes:
         raise ValueError(no_scene_message(info))
     cat = category(state, group)
-    size = max(2, int(c.params["round_candidates"]))
     if not c.frozen.get(group):
         c.frozen[group] = random_genome(state, group, rng, centered=True)
     base = register(c, full_genes(c, group, normalize(c.frozen[group], cat, rng)), "seed", [], 0)
-    ids, seen = [base.id], {base.key}
+    size = max(2, int(c.params["round_candidates"]))
+    ids = _fill_candidates(c, state, rng, [base], (size - 1) // 2, manual, size, {base.key}, [base.id])
+    r = Round(index=0, level=0, genome_ids=ids, seeds=new_seeds(c.params["round_seeds"][0]), scenes=scenes,
+              stage=c.stage)
+    c.rounds.append(r)
+    return r
 
-    def add(make, origin, parents):
+
+def _fill_candidates(c: Campaign, state: AppState, rng: random.Random, parents: list[Genome], mutations: int,
+                     manual: list | None, size: int, seen: set[str], ids: list[str]) -> list[str]:
+    """Adds mutations of `parents` (in turn), then manual entries, then fresh draws, all new to `seen`."""
+    group = stage_info(c)["group"]
+    cat = category(state, group)
+
+    def add(make, origin, parent_ids):
         for _ in range(RETRIES):
             genes = full_genes(c, group, make())
             if canonical_key(genes) not in seen:
                 break
         else:
             return
-        genome = register(c, genes, origin, parents, 0)
+        genome = register(c, genes, origin, parent_ids, 0)
         seen.add(genome.key)
         ids.append(genome.id)
 
-    for _ in range((size - 1) // 2):
-        add(lambda: mutate(c, state, base, group, c.params["rates"], rng)[0], "mutate", [base.id])
-    for genes in (manual or [])[: size - len(ids)]:
+    for i in range(mutations if parents else 0):
+        p = parents[i % len(parents)]
+        add(lambda p=p: mutate(c, state, p, group, c.params["rates"], rng)[0], "mutate", [p.id])
+    for genes in (manual or [])[: max(0, size - len(ids))]:
         add(lambda genes=genes: normalize(genes_from(genes), cat, rng), "seed", [])
     while len(ids) < size:
         before = len(ids)
         add(lambda: random_genome(state, group, rng), "random", [])
         if len(ids) == before:
             break
-    r = Round(index=0, genome_ids=ids, seeds=new_seeds(c.params["round_seeds"][0]), scenes=scenes, stage=c.stage)
-    c.rounds.append(r)
-    return r
+    return ids
+
+
+def retry_round(c: Campaign, state: AppState, rng: random.Random, r: Round, ranked: list[str]) -> Round:
+    """Nobody reached the pass rate: R1 again with mutations of the best candidates and fresh draws."""
+    size = max(2, int(c.params["round_candidates"]))
+    seen = {c.genomes[gid].key for x in stage_rounds(c) for gid in x.genome_ids if gid in c.genomes}
+    parents = [c.genomes[gid] for gid in ranked[:2]]
+    ids = _fill_candidates(c, state, rng, parents, size // 2, None, size, seen, [])
+    if not ids:
+        raise ValueError("새 후보를 더 만들 수 없습니다. 작가 풀을 늘리거나 이 단계를 건너뛰세요.")
+    nxt = Round(index=r.index + 1, level=0, attempt=r.attempt + 1, genome_ids=ids,
+                seeds=new_seeds(c.params["round_seeds"][0]), scenes=list(r.scenes), stage=c.stage)
+    c.rounds.append(nxt)
+    return nxt
+
+
+def round_level(r: Round) -> int:
+    return r.level if r.level >= 0 else r.index
 
 
 def round_count(c: Campaign) -> int:
     return 1 if c.stage == "confirm" else len(c.params["round_seeds"])
+
+
+def pass_rate(c: Campaign) -> float:
+    return float(c.params.get("pass_rate", DEFAULT_PARAMS["pass_rate"]))
+
+
+def passes(c: Campaign, genome_id: str) -> bool:
+    return genome_stats(c, genome_id, c.stage)["rate"] >= pass_rate(c) - 1e-9
 
 
 def rank_round(c: Campaign, r: Round) -> list[str]:
@@ -705,7 +767,8 @@ def rank_round(c: Campaign, r: Round) -> list[str]:
 
 
 def close_round(c: Campaign, state: AppState, rng: random.Random, force=False) -> dict:
-    """Keeps the better half by success rate (ties: fewer style failures, then nearer the baseline)."""
+    """Keeps the better half of the candidates at or above the pass rate (ties: fewer style failures,
+    then nearer the baseline). When nobody passes, the stage starts over from R1 with new candidates."""
     r = current_batch(c)
     if not isinstance(r, Round):
         raise ValueError("진행 중인 라운드가 없습니다.")
@@ -722,14 +785,21 @@ def close_round(c: Campaign, state: AppState, rng: random.Random, force=False) -
         c.champions["confirm"] = ranked[0]
         c.stage = "done"
         return r.result
-    keep = min(len(ranked), max(1, len(r.genome_ids) // 2))
-    r.survivors, r.status = ranked[:keep], "done"
-    if r.index + 1 < round_count(c) and keep > 1:
-        nxt = Round(index=r.index + 1, genome_ids=list(r.survivors), seeds=new_seeds(c.params["round_seeds"][r.index + 1]),
-                    scenes=list(r.scenes), stage=c.stage)
+    passed = [gid for gid in ranked if passes(c, gid)]
+    if not passed:
+        best = genome_stats(c, ranked[0], c.stage)
+        nxt = retry_round(c, state, rng, r, ranked)
+        r.survivors, r.status = [], "done"
+        return {"retry": nxt.attempt, "best_rate": best["rate"]}
+    keep = min(len(passed), max(1, len(r.genome_ids) // 2))
+    r.survivors, r.status = passed[:keep], "done"
+    level = round_level(r)
+    if level + 1 < round_count(c):
+        nxt = Round(index=r.index + 1, level=level + 1, attempt=r.attempt, genome_ids=list(r.survivors),
+                    seeds=new_seeds(c.params["round_seeds"][level + 1]), scenes=list(r.scenes), stage=c.stage)
         c.rounds.append(nxt)
-        return {"next_round": nxt.index}
-    finalists = ranked[:2]
+        return {"next_round": nxt.level}
+    finalists = passed[:2]
     stats = [genome_stats(c, gid, c.stage) for gid in finalists]
     overlap = len(stats) > 1 and stats[0]["low"] <= stats[1]["high"] and stats[1]["low"] <= stats[0]["high"]
     r.survivors = finalists
@@ -777,7 +847,7 @@ def enter_stage(c: Campaign, state: AppState, rng: random.Random, start=None, ma
     if c.stage == "confirm":
         final = final_genome(c)
         c.champions["final"] = final.id
-        c.rounds.append(Round(index=0, genome_ids=[final.id], seeds=new_seeds(c.params["confirm_seeds"]),
+        c.rounds.append(Round(index=0, level=0, genome_ids=[final.id], seeds=new_seeds(c.params["confirm_seeds"]),
                               scenes=round_scenes(state) or [c.preset], stage="confirm"))
     elif info["kind"] == "evolve":
         c.generations.append(first_generation(c, state, rng, start))
@@ -897,6 +967,11 @@ def clean_params(params: dict | None) -> dict:
             low, high = PARAM_LIMITS[key]
             if type(value) is not int or not low <= value <= high:
                 raise ValueError(f"탐색 설정 '{key}'는 {low}~{high} 사이의 정수여야 합니다.")
+        if key in FLOAT_LIMITS:
+            low, high = FLOAT_LIMITS[key]
+            if type(value) not in (int, float) or not low <= value <= high:
+                raise ValueError(f"탐색 설정 '{key}'는 {low}~{high} 사이의 숫자여야 합니다.")
+            value = float(value)
         merged[key] = value
     return merged
 
@@ -1041,7 +1116,8 @@ def campaign_info(c: Campaign, state: AppState | None = None) -> dict:
               "converging": is_converging(c) if evolve else False,
               "generation_limit": generation_limit(c) if evolve else 0,
               "round_count": round_count(c) if info["kind"] == "round" else 0,
-              "next_stage": next_stage(c, c.stage), "reference_stage": reference_stage(c)}
+              "next_stage": next_stage(c, c.stage), "reference_stage": reference_stage(c),
+              "pass_rate": pass_rate(c)}
     batch = current_batch(c)
     result["suggest_finish"] = bool(evolve and (
         result["streak"] >= int(c.params["stop_after_same_winner"])

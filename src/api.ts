@@ -51,6 +51,7 @@ export const exploreApi = {
     api<CampaignReply & { job_id: string }>("explore/run", { id }),
   pick: (id: string, generation: number, picks: string[], force = false) =>
     api<CampaignReply>("explore/pick", { id, generation, picks, force }),
+  extend: (id: string) => api<CampaignReply>("explore/extend", { id }),
   label: (id: string, trial_id: string, failures: string[]) =>
     api<CampaignReply>("explore/label", { id, trial_id, failures }),
   closeRound: (id: string, force = false) =>

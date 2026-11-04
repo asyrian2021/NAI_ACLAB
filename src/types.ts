@@ -179,6 +179,9 @@ export type RoundResult = {
   recommended?: string;
   overlap?: boolean;
   next_round?: number;
+  /** Nobody passed: the stage started over (attempt number) after a best rate of `best_rate`. */
+  retry?: number;
+  best_rate?: number;
 };
 export type Round = {
   index: number;
@@ -190,6 +193,10 @@ export type Round = {
   stage: string;
   eliminated: string[];
   result: RoundResult;
+  /** Step on the seed ladder (R1 = 0); -1 in older campaigns, where the index is the step. */
+  level?: number;
+  /** How many times the stage started over because nobody passed. */
+  attempt?: number;
 };
 export type GenomeStats = {
   s: number;
@@ -212,6 +219,8 @@ export type CampaignParams = {
   retune_generations: number;
   confirm_seeds: number;
   wilson_z: number;
+  /** Lowest success rate that lets a rate candidate go on (0.7 = 70%). */
+  pass_rate: number;
 };
 export type Campaign = {
   id: string;
@@ -243,6 +252,7 @@ export type Campaign = {
     converging: boolean;
     generation_limit: number;
     round_count: number;
+    pass_rate: number;
     next_stage: string;
     suggest_finish: boolean;
     /** Scenes the next stage would use, when it is a rate stage. */

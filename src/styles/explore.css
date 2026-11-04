@@ -414,6 +414,78 @@ button.finish-suggested {
   align-items: center;
   gap: 4px;
 }
+/* Pick bracket: 2–3 combinations at a time */
+.bracket-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: var(--fs-sm);
+}
+.bracket-steps li {
+  padding: 3px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  color: var(--color-muted);
+}
+.bracket-steps li.current {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+  font-weight: 650;
+}
+.bracket-steps li.decided {
+  color: var(--color-text-secondary);
+  background: var(--color-panel);
+}
+.seed-tabs {
+  display: flex;
+  gap: 6px;
+}
+.match {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 1400px;
+}
+.match-result {
+  grid-template-columns: repeat(2, minmax(0, 360px));
+}
+.match-card {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  align-content: start;
+}
+.match-image {
+  width: 100%;
+  /* The status bar, bracket steps and artist lists stay in view. */
+  height: clamp(280px, calc(100vh - 500px), 960px);
+  aspect-ratio: auto;
+  cursor: pointer;
+}
+.match-image:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-glow);
+}
+.match-result .match-image {
+  height: clamp(240px, calc(100vh - 460px), 640px);
+  cursor: default;
+}
+.match-card.picked .match-image {
+  border-color: var(--color-accent);
+}
+.match-info {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-panel);
+}
+.match-info .row {
+  gap: 6px;
+}
 .evolve-archive summary {
   display: inline-flex;
   align-items: center;
@@ -482,8 +554,8 @@ button.finish-suggested {
   font-size: var(--fs-sm);
 }
 .round-stage {
-  /* The grid takes its natural width (scrolling past 62%); the preview gets the rest. */
-  grid-template-columns: minmax(280px, 1fr) fit-content(62%);
+  /* One image at a time; the full grid folds away below it. */
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: var(--space-4);
 }
@@ -491,8 +563,6 @@ button.finish-suggested {
   display: grid;
   gap: var(--space-2);
   min-width: 0;
-  position: sticky;
-  top: 0;
 }
 .round-stage-head {
   display: flex;
@@ -655,6 +725,28 @@ button.finish-suggested {
   bottom: 0;
   border-radius: 999px;
   background: var(--color-accent-border);
+}
+.interval-bar .pass-line {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 0;
+  border-left: 2px dashed var(--color-amber);
+}
+.badge.danger {
+  color: var(--color-danger);
+  background: var(--color-danger-surface);
+}
+.candidate.below {
+  opacity: 0.6;
+}
+.review-progress {
+  margin-left: auto;
+}
+.round-grid-wrap > summary {
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  margin-bottom: var(--space-2);
 }
 .interval-bar .tick {
   position: absolute;

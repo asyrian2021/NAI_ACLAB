@@ -223,7 +223,7 @@ class ServerTests(unittest.TestCase):
         state=self.explore_state()
         frozen=self.request('/api/explore/baseline',{'plan':[{'group':'메인','mode':'pick'},{'group':'신체','mode':'rate'}]})['frozen']
         self.assertEqual(list(frozen),['신체'])
-        c=self.request('/api/explore/create',{'name':'테스트','plan':[{'group':'메인','mode':'pick'},{'group':'신체','mode':'rate'}],'preset':state['generation']['preset'],'image_size':'landscape','frozen':frozen})['campaign']
+        c=self.request('/api/explore/create',{'name':'테스트','plan':[{'group':'메인','mode':'pick'},{'group':'신체','mode':'rate'}],'preset':state['generation']['preset'],'image_size':'landscape','frozen':frozen,'params':{'seeds_per_gen':2}})['campaign']
         self.assertEqual(c['frozen']['신체'],frozen['신체'])
         prompts=[]
         original=app.NovelAIClient.generate
@@ -234,7 +234,7 @@ class ServerTests(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError):self.request('/api/explore/run',{'id':c['id']})
             web.WORK.join()
         self.assertEqual(web.JOBS[job]['status'],'done')
-        self.assertTrue(web.JOBS[job]['name'].startswith('탐색 · 테스트 · 1단계 0세대'))
+        self.assertTrue(web.JOBS[job]['name'].startswith('탐색 · 테스트 · 1단계 라운드 1'))
         c=self.request('/api/explore/'+c['id'])['campaign']
         gen=c['generations'][0]
         self.assertEqual(len(c['trials']),12);self.assertEqual(gen['status'],'awaiting_pick')
@@ -252,7 +252,7 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(c['generations'][1]['genome_ids'][:2],gen['genome_ids'][:2])
         self.assertEqual(c['info']['pending'],12)
         listing=self.request('/api/explore')['campaigns']
-        self.assertEqual((listing[0]['id'],listing[0]['progress']),(c['id'],'1세대'))
+        self.assertEqual((listing[0]['id'],listing[0]['progress']),(c['id'],'라운드 2'))
         c=self.request('/api/explore/advance',{'id':c['id'],'champion_id':gen['genome_ids'][0]})['campaign']
         self.assertEqual(c['stage'],'s1');self.assertEqual(len(c['rounds'][0]['genome_ids']),8)
         self.request('/api/explore/delete',{'id':c['id']})
@@ -263,7 +263,7 @@ class ServerTests(unittest.TestCase):
         state=self.explore_state()
         with self.assertRaises(urllib.error.HTTPError) as e:self.request('/api/explore/create',{'plan':[{'group':'메인','mode':'pick'}],'preset':state['generation']['preset']})
         self.assertEqual(e.exception.code,400)  # No image size chosen.
-        c=self.request('/api/explore/create',{'plan':[{'group':'메인','mode':'pick'}],'preset':state['generation']['preset'],'image_size':'square'})['campaign']
+        c=self.request('/api/explore/create',{'plan':[{'group':'메인','mode':'pick'}],'preset':state['generation']['preset'],'image_size':'square','params':{'seeds_per_gen':2}})['campaign']
         job='explore-cancel-test'
         web.JOBS[job]={'id':job,'status':'queued','progress':0,'total':12,'campaign_id':c['id']}
         def cancel_after_three(client,prompt,negative,path):

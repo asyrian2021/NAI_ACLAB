@@ -21,8 +21,8 @@ export const MODE_NAMES: Record<PlanMode, string> = {
   off: "사용 안 함",
 };
 export const MODE_HINTS: Record<PlanMode, string> = {
-  pick: "같은 시드로 나란히 놓고 마음에 드는 조합을 고릅니다.",
-  rate: "후보를 여러 장면에서 생성하고 실패 비율로 좁힙니다.",
+  pick: "2~3장 중 마음에 드는 하나를 고르며 3라운드 안에 화풍을 좁힙니다.",
+  rate: "후보를 여러 장면에서 한 장씩 확인하고, 통과 기준(기본 70%) 이상만 남깁니다.",
   fixed: "한 번 정한 작가로 탐색 내내 고정합니다.",
   off: "탐색 이미지의 프롬프트에 넣지 않습니다.",
 };
@@ -197,18 +197,81 @@ export function guessPlan(categories: Category[]): PlanEntry[] {
   });
 }
 
+/**
+ * Column groups of a pick generation, 2–3 combinations each (larger first):
+ * 6 → [3, 3], 5 → [3, 2], 4 → [2, 2], 8 → [3, 3, 2].
+ */
+export function heatSizes(count: number) {
+  if (count <= 0) return [];
+  const k = Math.ceil(count / 3);
+  return Array.from(
+    { length: k },
+    (_, i) => Math.floor(count / k) + (i < count % k ? 1 : 0),
+  );
+}
+
+/** One comparison of the bracket: which columns it shows and who won (null = all bad). */
+export type Match = { key: string; name: string; columns: number[] };
+
+/**
+ * A generation as a small bracket: every heat picks one, then the heat winners
+ * meet in a final. `winners[i]` is the outcome of match i (undefined = open).
+ * Returns the matches so far, the open one, and the picks once it is decided.
+ */
+export function bracket(ids: string[], winners: (string | null | undefined)[]) {
+  let start = 0;
+  const heats: Match[] = heatSizes(ids.length).map((size, i, all) => {
+    const columns = Array.from({ length: size }, (_, j) => start + j);
+    start += size;
+    return {
+      key: "h" + i,
+      name: all.length > 1 ? `${i + 1}조` : "비교",
+      columns,
+    };
+  });
+  const matches = [...heats];
+  const heatWinners = heats.map((_, i) => winners[i]);
+  const heatsDone = heatWinners.every((w) => w !== undefined);
+  const finalists = heatWinners.filter((w): w is string => !!w);
+  if (heats.length > 1 && (!heatsDone || finalists.length > 1))
+    matches.push({
+      key: "final",
+      name: "결승",
+      columns: heatsDone ? finalists.map((id) => ids.indexOf(id)) : [],
+    });
+  const open = matches.findIndex((_, i) => winners[i] === undefined);
+  let picks: string[] | null = null;
+  if (open < 0) {
+    if (matches.length === heats.length) picks = finalists.slice(0, 1);
+    else {
+      const champion = winners[heats.length];
+      picks = champion
+        ? [
+            champion,
+            ...(finalists.length === 2
+              ? finalists.filter((id) => id !== champion)
+              : []),
+          ]
+        : [];
+    }
+  }
+  return { matches, open, picks };
+}
+
 /** Candidate letters follow the R1 order so a combination keeps its name across rounds. */
 export function candidateLetters(c: Campaign, stage: string) {
   const first = c.rounds.find((r) => r.stage === stage);
   const names = new Map<string, string>();
-  (first?.genome_ids || []).forEach((id, i) =>
-    names.set(id, String.fromCharCode(65 + (i % 26))),
-  );
+  // A, B, … Z, then A2, B2, … once retries add more candidates.
+  const letter = (i: number) =>
+    String.fromCharCode(65 + (i % 26)) +
+    (i >= 26 ? Math.floor(i / 26) + 1 : "");
+  (first?.genome_ids || []).forEach((id, i) => names.set(id, letter(i)));
   c.rounds
     .filter((r) => r.stage === stage)
     .flatMap((r) => r.genome_ids)
     .forEach((id) => {
-      if (!names.has(id)) names.set(id, String.fromCharCode(65 + names.size));
+      if (!names.has(id)) names.set(id, letter(names.size));
     });
   return names;
 }

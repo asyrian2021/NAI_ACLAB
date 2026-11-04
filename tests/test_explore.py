@@ -110,7 +110,9 @@ class EvolutionTests(unittest.TestCase):
     def setUp(self):
         self.state = make_state()
         self.rng = random.Random(11)
-        self.c = ex.create_campaign(self.state, "t", PLAN, "기본", rng=self.rng)
+        # The operator mechanics are checked on long, two-seed stages; the short defaults have their own tests.
+        self.c = ex.create_campaign(self.state, "t", PLAN, "기본", rng=self.rng,
+                                    params={"max_generations": 12, "seeds_per_gen": 2, "stop_after_same_winner": 3})
 
     def pick(self, picks):
         gen = ex.current_batch(self.c)
@@ -489,6 +491,88 @@ class PlanTests(unittest.TestCase):
             ex.create_campaign(self.state, "t", [{"group": "메인", "mode": "rate", "labels": ["nope"]}], "기본", rng=self.rng)
         frozen = ex.baseline(self.state, self.plan, rng=self.rng)
         self.assertEqual(set(frozen), {"신체", "색감", "메인", "배경"})
+
+
+class ShortSearchTests(unittest.TestCase):
+    """The defaults: a pick stage in three generations, and a pass rate in every round."""
+
+    def setUp(self):
+        self.state = make_state()
+        self.rng = random.Random(21)
+        self.c = ex.create_campaign(self.state, "t", PLAN, "기본", rng=self.rng)
+
+    def test_pick_stage_takes_three_one_seed_generations_and_converges_last(self):
+        gen = ex.current_batch(self.c)
+        self.assertEqual((len(gen.genome_ids), len(gen.seeds)), (6, 1))
+        self.assertFalse(ex.is_converging(self.c))
+        for expected in (False, True):
+            fill_trials(self.c)
+            nxt = ex.pick(self.c, self.state, gen.index, gen.genome_ids[:2] if not expected else gen.genome_ids[2:3],
+                          self.rng)
+            self.assertEqual(ex.is_converging(self.c), expected)
+            gen = nxt
+        fill_trials(self.c)
+        self.assertIsNone(ex.pick(self.c, self.state, gen.index, [gen.genome_ids[0]], self.rng))
+        self.assertTrue(ex.campaign_info(self.c, self.state)["suggest_finish"])
+        # One more generation on request, built from the last pick.
+        extra = ex.extend_generation(self.c, self.state, self.rng)
+        self.assertEqual((extra.index, extra.genome_ids[0]), (3, gen.genome_ids[0]))
+        with self.assertRaises(ValueError):
+            ex.extend_generation(self.c, self.state, self.rng)
+
+    def rate_stage(self):
+        ex.advance_stage(self.c, self.state, self.c.generations[0].genome_ids[0], self.rng)
+        return ex.current_batch(self.c)
+
+    def test_only_candidates_at_the_pass_rate_go_on(self):
+        r1 = self.rate_stage()
+        strong = r1.genome_ids[5]
+        # 6 images each: one failure (83%) passes, two (67%) do not.
+        fill_trials(self.c, lambda t: [] if t["genome_id"] == strong else
+                    ["anatomy"] if t["scene"] != "맨발" and t["seed"] == r1.seeds[0] else [])
+        self.assertEqual(ex.close_round(self.c, self.state, self.rng), {"next_round": 1})
+        self.assertEqual(r1.survivors, [strong])
+        r2 = ex.current_batch(self.c)
+        self.assertEqual((r2.genome_ids, r2.level, len(r2.seeds)), ([strong], 1, 4))
+        self.assertEqual(ex.progress_label(self.c), "R2")
+
+    def test_round_nobody_passes_starts_over_with_new_candidates(self):
+        r1 = self.rate_stage()
+        best = r1.genome_ids[2]
+        fill_trials(self.c, lambda t: ["anatomy"] if t["seed"] == r1.seeds[0] and (t["genome_id"] != best or t["scene"] != "맨발") else [])
+        result = ex.close_round(self.c, self.state, self.rng)
+        self.assertEqual(result["retry"], 1)
+        self.assertAlmostEqual(result["best_rate"], 4 / 6)  # The best one still misses 70%.
+        self.assertEqual(r1.survivors, [])
+        retry = ex.current_batch(self.c)
+        self.assertEqual((retry.index, retry.level, retry.attempt, len(retry.genome_ids)), (1, 0, 1, 8))
+        self.assertFalse(set(retry.genome_ids) & set(r1.genome_ids))
+        mutated = [self.c.genomes[g] for g in retry.genome_ids if self.c.genomes[g].origin == "mutate"]
+        self.assertEqual(len(mutated), 4)
+        self.assertEqual(mutated[0].parents, [best])
+        self.assertEqual(ex.progress_label(self.c), "R1 재도전 1")
+        fill_trials(self.c)
+        self.assertEqual(ex.close_round(self.c, self.state, self.rng), {"next_round": 1})
+        self.assertEqual(ex.current_batch(self.c).attempt, 1)
+
+    def test_pass_rate_param(self):
+        c = ex.create_campaign(self.state, "t", PLAN, "기본", rng=self.rng, params={"pass_rate": .5})
+        self.assertEqual(c.params["pass_rate"], .5)
+        self.assertEqual(ex.campaign_info(c, self.state)["pass_rate"], .5)
+        with self.assertRaises(ValueError):
+            ex.clean_params({"pass_rate": 1.5})
+
+    def test_older_rounds_read_their_level_from_the_index(self):
+        r1 = self.rate_stage()
+        fill_trials(self.c)
+        ex.close_round(self.c, self.state, self.rng)
+        data = ex.campaign_to_dict(self.c)
+        for r in data["rounds"]:
+            r.pop("level"), r.pop("attempt")
+        old = ex.campaign_from_dict(data)
+        self.assertEqual([ex.round_level(r) for r in old.rounds], [0, 1])
+        fill_trials(old)
+        self.assertEqual(ex.close_round(old, self.state, self.rng), {"next_round": 2})
 
 
 class PersistenceTests(unittest.TestCase):
