@@ -1,7 +1,7 @@
 /* Combination search: campaign list, evolution grid, success-rate rounds and summary. */
 .explore-page {
   max-width: none;
-  padding: var(--space-6) var(--space-8) 50px;
+  padding: var(--space-5) var(--space-8);
 }
 .explore {
   display: grid;
@@ -403,17 +403,6 @@ button.finish-suggested {
   font-size: var(--fs-xs);
   color: var(--color-subtle);
 }
-.evolve-footer {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: var(--space-3);
-}
-.evolve-footer .badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
 /* Pick bracket: 2–3 combinations at a time */
 .bracket-steps {
   list-style: none;
@@ -443,25 +432,53 @@ button.finish-suggested {
   display: flex;
   gap: 6px;
 }
-.match {
-  display: grid;
-  gap: var(--space-3);
-  max-width: 1400px;
+/* The pick stage fills the window: the compared images take every pixel left. */
+.explore:has(> .evolve) {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
 }
-.match-result {
-  grid-template-columns: repeat(2, minmax(0, 360px));
+.evolve {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.evolve > .evolve-bar {
+  justify-content: flex-start;
+  gap: var(--space-2) var(--space-4);
+  padding: 8px 14px;
+}
+.evolve-bar .evolve-help {
+  flex: 1 1 240px;
+  text-align: right;
+}
+.match {
+  /* Sized by the layout, never by its tiles (contain), which useFitTiles
+     then sizes to fill it exactly. */
+  flex: 1 1 0;
+  min-height: 360px;
+  contain: size;
+  display: grid;
+  gap: 12px;
+  justify-content: center;
+  align-content: center;
+  overflow: hidden;
 }
 .match-card {
   display: grid;
-  gap: var(--space-2);
+  gap: 8px;
   min-width: 0;
   align-content: start;
 }
+/* Wide, short windows: the artist list moves beside the image. */
+.match-card.side {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+}
 .match-image {
   width: 100%;
-  /* The status bar, bracket steps and artist lists stay in view. */
-  height: clamp(280px, calc(100vh - 500px), 960px);
-  aspect-ratio: auto;
   cursor: pointer;
 }
 .match-image:hover:not(:disabled) {
@@ -469,8 +486,12 @@ button.finish-suggested {
   box-shadow: 0 0 0 2px var(--color-accent-glow);
 }
 .match-result .match-image {
-  height: clamp(240px, calc(100vh - 460px), 640px);
-  cursor: default;
+  cursor: zoom-in;
+}
+.match-result > .badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .match-card.picked .match-image {
   border-color: var(--color-accent);
@@ -606,7 +627,6 @@ button.finish-suggested {
 .round-grid {
   display: grid;
   gap: 4px;
-  width: max-content;
 }
 .round-scene-head {
   font-size: var(--fs-xs);
@@ -623,6 +643,11 @@ button.finish-suggested {
 .round-row.out > * {
   opacity: 0.35;
 }
+/* Dropped candidates stay viewable: their thumbnails light up on hover or when shown. */
+.round-row.out > .round-cell:hover,
+.round-row.out > .round-cell.focused {
+  opacity: 1;
+}
 .round-row-label {
   align-self: center;
   font-size: var(--fs-xs);
@@ -631,7 +656,8 @@ button.finish-suggested {
 .round-cell {
   position: relative;
   padding: 0;
-  height: 112px;
+  /* Image-shaped cells: wider panels show bigger thumbnails, never letterboxed. */
+  aspect-ratio: 832 / 1216;
   overflow: hidden;
   border: 2px solid transparent;
   border-radius: var(--radius-sm);
@@ -649,8 +675,7 @@ button.finish-suggested {
 .round-cell.void {
   color: var(--color-danger);
 }
-.round-cell.focused,
-.round-cell:focus-visible {
+.round-cell.focused {
   outline: 2px solid var(--color-accent);
   outline-offset: 1px;
 }

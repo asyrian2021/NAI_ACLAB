@@ -155,43 +155,61 @@ export function RoundView({
   const queue = cells.filter(inQueue);
   const keyOf = (cell: Cell) => cellKey(cell.gid, cell.seed, cell.scene);
   const [current, setCurrent] = useState("");
-  // Start (and move on, when a candidate drops out) at the first image not looked at.
+  // A dropped candidate's image opened from the full grid stays shown.
+  const [peek, setPeek] = useState("");
   const position = cells.findIndex((cell) => keyOf(cell) === current);
+  // Open at the first image not looked at; when the shown candidate drops out,
+  // move on to the very next image still in play (never past one).
   const focusCell =
-    position >= 0 && inQueue(cells[position])
-      ? cells[position]
-      : (cells
-          .slice(Math.max(0, position))
-          .find((cell) => inQueue(cell) && !reviewed.has(keyOf(cell))) ??
-        queue.find((cell) => !reviewed.has(keyOf(cell))) ??
+    position < 0
+      ? (queue.find((cell) => !reviewed.has(keyOf(cell))) ??
         queue.at(-1) ??
-        cells[0]);
+        cells[0])
+      : inQueue(cells[position]) || current === peek
+        ? cells[position]
+        : (cells.slice(position).find(inQueue) ??
+          cells.slice(0, position).reverse().find(inQueue) ??
+          cells[position]);
   const focusKey = focusCell ? keyOf(focusCell) : "";
   const focused = focusCell ? trials.get(focusKey) : undefined;
   const focusGid = focusCell?.gid;
+  const focusOut = !!focusCell && !inQueue(focusCell);
+  function show(key: string, keep = false) {
+    setCurrent(key);
+    setPeek(keep ? key : "");
+  }
   const checked = queue.filter((cell) => reviewed.has(keyOf(cell))).length;
   const allChecked = queue.length > 0 && checked === queue.length && !pending;
   const skipped = rows.filter(
     (gid) => !r.eliminated.includes(gid) && doomed(gid),
   );
 
+  /** ← →: the previous / next image in order; moving on marks this one as seen. */
   function step(delta: 1 | -1) {
     if (!focusCell) return;
     if (delta === 1) markReviewed(focusKey);
     const at = cells.indexOf(focusCell);
     const list =
       delta === 1 ? cells.slice(at + 1) : cells.slice(0, at).reverse();
-    const next =
-      list.find(
-        (cell) => inQueue(cell) && (delta === -1 || !reviewed.has(keyOf(cell))),
-      ) ?? list.find(inQueue);
-    if (next) setCurrent(keyOf(next));
+    const next = list.find(inQueue);
+    if (next) show(keyOf(next));
+  }
+
+  /** ↑ ↓: the same scene and seed of the previous / next candidate still in play. */
+  function stepCandidate(delta: 1 | -1) {
+    if (!focusCell) return;
+    const at = rows.indexOf(focusCell.gid);
+    const list = delta === 1 ? rows.slice(at + 1) : rows.slice(0, at).reverse();
+    const gid = list.find((g) => !r.eliminated.includes(g) && !doomed(g));
+    if (gid) show(cellKey(gid, focusCell.seed, focusCell.scene));
   }
 
   function toggleLabel(trial: Trial | undefined, code: string) {
     if (!trial || trial.error || done) return;
-    markReviewed(cellKey(trial.genome_id, trial.seed, trial.scene));
-    setCurrent(cellKey(trial.genome_id, trial.seed, trial.scene));
+    const key = cellKey(trial.genome_id, trial.seed, trial.scene);
+    markReviewed(key);
+    // A label set while looking at a dropped candidate keeps that image shown.
+    show(key, key === peek);
     const failures = trial.failures.includes(code)
       ? trial.failures.filter((f) => f !== code)
       : [...trial.failures, code];
@@ -223,6 +241,8 @@ export function RoundView({
       )
         step(1);
       else if (event.key === "ArrowLeft") step(-1);
+      else if (event.key === "ArrowDown") stepCandidate(1);
+      else if (event.key === "ArrowUp") stepCandidate(-1);
       else {
         const code = codes.find((f) => f.key === event.key);
         if (!code) return;
@@ -352,6 +372,13 @@ export function RoundView({
           <div className="round-focus">
             <div className="round-stage-head">
               <strong>{focusGid && name(focusGid)}</strong>
+              {focusOut && focusGid && (
+                <span className="badge danger">
+                  {r.eliminated.includes(focusGid)
+                    ? "탈락한 후보"
+                    : "기준 미달 후보"}
+                </span>
+              )}
               <span className="micro">
                 {focusCell &&
                   `${focusCell.scene} · 시드 ${focusCell.si + 1}` +
@@ -423,9 +450,10 @@ export function RoundView({
             </div>
             <p className="micro">
               한 장씩 봅니다. 실패만 숫자 키로 표시하고 <kbd>Space</kbd>·
-              <kbd>→</kbd>로 넘기세요(표시하지 않은 이미지는 성공). 남은
-              이미지가 다 성공해도 {pct(passRate)}에 못 미치는 후보는 자동으로
-              건너뜁니다.
+              <kbd>→</kbd>로 넘기세요(표시하지 않은 이미지는 성공). <kbd>←</kbd>{" "}
+              이전 · <kbd>↑</kbd>
+              <kbd>↓</kbd> 같은 장면의 다른 후보. 남은 이미지가 다 성공해도{" "}
+              {pct(passRate)}에 못 미치는 후보는 자동으로 건너뜁니다.
             </p>
           </div>
           <details className="round-grid-wrap">
@@ -435,7 +463,10 @@ export function RoundView({
               role="grid"
               aria-label={`${roundTitle} 결과`}
               style={{
-                gridTemplateColumns: `92px repeat(${columns.length}, 84px)`,
+                // The whole grid fits at once: columns share the panel width
+                // but stay short enough that every row fits in ~60% of the window
+                // (never below the old 84px thumbnails; past that the panel scrolls).
+                gridTemplateColumns: `92px repeat(${columns.length}, max(84px, min(calc((100% - ${92 + 4 * columns.length}px) / ${columns.length}), calc(${(60 / Math.max(1, rows.length)).toFixed(2)}vh * 832 / 1216))))`,
               }}
             >
               <div role="presentation" />
@@ -477,7 +508,10 @@ export function RoundView({
                             (t?.failures.length ? " failed" : "") +
                             (t?.error ? " void" : "")
                           }
-                          onClick={() => setCurrent(key)}
+                          // A click only moves the highlight; it keeps no keyboard focus that
+                          // would stay outlined once the arrow keys move on.
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => show(key, out)}
                         >
                           {t && !t.error ? (
                             <img

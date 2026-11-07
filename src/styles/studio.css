@@ -314,7 +314,9 @@
   border-color: var(--color-accent);
 }
 .grid .image-well {
-  height: 200px;
+  width: 100%;
+  aspect-ratio: 832 / 1216;
+  min-height: 0;
 }
 .grid .image-well img {
   height: 100%;

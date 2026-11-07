@@ -160,15 +160,22 @@ export function GuidanceTest({
         ),
       )
     : 5;
+  // Cells take the images' shape; the size is the longer side, so a portrait
+  // cell is as tall as the old square and only loses its side letterbox.
+  const sample = result?.items.find((i) => i.width && i.height) || source;
+  const ratio =
+    sample?.width && sample?.height ? sample.width / sample.height : 1;
+  const shareW = Math.min(1, ratio);
+  const shareH = Math.min(1, 1 / ratio);
   const fullCellSize = fitGrid
     ? Math.max(
         2,
         Math.floor(
           Math.min(
             (gridSpace.width - 104 - gridX.length * fullGap - 4) /
-              Math.max(1, gridX.length),
+              (Math.max(1, gridX.length) * shareW),
             (gridSpace.height - 100 - gridY.length * fullGap - 4) /
-              Math.max(1, gridY.length),
+              (Math.max(1, gridY.length) * shareH),
           ),
         ),
       )
@@ -217,7 +224,7 @@ export function GuidanceTest({
         <div
           className="sweep-grid"
           style={{
-            gridTemplateColumns: `104px repeat(${gridX.length}, ${size}px)`,
+            gridTemplateColumns: `104px repeat(${gridX.length}, ${Math.round(size * shareW)}px)`,
             gap: full ? fullGap : undefined,
           }}
           role="table"
@@ -235,7 +242,11 @@ export function GuidanceTest({
           {gridX.map((value, index) => (
             <div className="sweep-x" role="columnheader" key={`x${index}`}>
               <span
-                style={full ? { fontSize: Math.min(15, size / 3) } : undefined}
+                style={
+                  full
+                    ? { fontSize: Math.min(15, (size * shareW) / 3) }
+                    : undefined
+                }
               >
                 {value}
               </span>
@@ -252,7 +263,10 @@ export function GuidanceTest({
                   style={
                     full
                       ? {
-                          fontSize: Math.min(16, Math.max(2, size * 0.6)),
+                          fontSize: Math.min(
+                            16,
+                            Math.max(2, size * shareH * 0.6),
+                          ),
                           lineHeight: 1,
                         }
                       : undefined
@@ -268,7 +282,7 @@ export function GuidanceTest({
                     className="sweep-cell"
                     role="cell"
                     key={xi}
-                    style={{ height: size }}
+                    style={{ height: Math.round(size * shareH) }}
                   >
                     {item ? (
                       item.error ? (

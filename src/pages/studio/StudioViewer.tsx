@@ -113,6 +113,12 @@ export function StudioViewer({
         <div
           className="image-well"
           data-zoom-well
+          // Grid tiles take the image's own shape, so no letterbox is left around it.
+          style={
+            view === "grid" && item.width && item.height
+              ? { aspectRatio: `${item.width} / ${item.height}` }
+              : undefined
+          }
           onDoubleClick={
             view === "grid"
               ? () => {

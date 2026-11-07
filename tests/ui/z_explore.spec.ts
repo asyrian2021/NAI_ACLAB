@@ -132,6 +132,29 @@ test("combination search runs from evolution through a round to a fixed combinat
     "2조",
     "결승",
   ]);
+  // The compared images fill the space left under the bar, side by side.
+  const tiles = await page
+    .locator(".match-image")
+    .evaluateAll((els) => els.map((e) => e.getBoundingClientRect()));
+  const area = await page.locator(".match").boundingBox();
+  expect(new Set(tiles.map((t) => Math.round(t.top))).size).toBe(1);
+  expect(
+    Math.max(
+      tiles[0].height / area!.height,
+      (tiles.length * tiles[0].width) / area!.width,
+    ),
+  ).toBeGreaterThan(0.6);
+  // A double click enlarges without picking; a single click still picks.
+  await page.locator(".match-image").first().dblclick();
+  const viewer = page.getByRole("dialog", { name: "1라운드 · 이미지 확대" });
+  await expect(viewer).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(viewer).toHaveCount(0);
+  await expect(page.locator(".bracket-steps li.current")).toHaveText("1조");
+  await page.locator(".match-image").nth(1).click();
+  await expect(page.locator(".bracket-steps li.current")).toHaveText("2조");
+  await page.keyboard.press("Backspace");
+  await expect(page.locator(".bracket-steps li.current")).toHaveText("1조");
   // Keyboard only: one per heat (Backspace undoes), then the final.
   await page.keyboard.press("2");
   await expect(page.locator(".bracket-steps li.current")).toHaveText("2조");
@@ -207,6 +230,44 @@ test("combination search runs from evolution through a round to a fixed combinat
   await page.keyboard.press(" ");
   await expect(current.locator("strong")).toHaveText("후보 C");
   await expect(page.locator(".review-progress")).toContainText("확인 2/14");
+  // Arrows walk in order, even over images already looked at.
+  const at = async (name: string, seed: number) => {
+    await expect(current.locator("strong")).toHaveText(name);
+    await expect(current).toContainText(`시드 ${seed}`);
+  };
+  await page.keyboard.press("ArrowLeft");
+  await at("후보 B", 2);
+  await page.keyboard.press("ArrowLeft");
+  await at("후보 B", 1);
+  await page.keyboard.press("ArrowRight");
+  await at("후보 B", 2);
+  // ↑ ↓ switch candidates on the same scene and seed; A dropped out, so ↑ stops at B.
+  await page.keyboard.press("ArrowDown");
+  await at("후보 C", 2);
+  await page.keyboard.press("ArrowUp");
+  await at("후보 B", 2);
+  await page.keyboard.press("ArrowUp");
+  await at("후보 B", 2);
+  // Clicking a thumbnail moves the highlight but leaves no focus ring behind.
+  await page.getByText(/전체 이미지 보기/).click();
+  await page.getByRole("gridcell", { name: /^후보 C · .* · 시드 1$/ }).click();
+  await at("후보 C", 1);
+  await page.keyboard.press("ArrowLeft");
+  await at("후보 B", 2);
+  expect(
+    await page.evaluate(
+      () => !!document.activeElement?.closest(".round-cell, .match-image"),
+    ),
+  ).toBe(false);
+  await expect(page.locator(".round-cell.focused")).toHaveCount(1);
+  // A dropped candidate's images can still be opened from the grid; → returns to play.
+  await page.getByRole("gridcell", { name: /^후보 A · .* · 시드 2$/ }).click();
+  await at("후보 A", 2);
+  await expect(current.locator(".badge.danger")).toHaveText("기준 미달 후보");
+  await expect(page.locator(".round-stage-image img")).toBeVisible();
+  await page.keyboard.press("ArrowRight");
+  await at("후보 B", 1);
+  await expect(current.locator(".badge.danger")).toHaveCount(0);
   await page.getByRole("button", { name: "라운드 마감" }).click();
   await expect(page.locator(".evolve-status strong")).toHaveText("R2 / 3");
   // A candidate can be confirmed mid-way, without running the remaining rounds.
